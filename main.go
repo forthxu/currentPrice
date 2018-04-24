@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"github.com/gorilla/websocket"
 	"github.com/tidwall/gjson"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -26,6 +27,7 @@ Options are:
     -t token    notify token for Server酱[http://sc.ftqq.com/3.version]
     -g gap      time gap for get data
     -x proxy    default no use proxy
+    -f path     path to save data
 `
 
 var (
@@ -34,6 +36,7 @@ var (
 	token string
 	gap   int
 	proxy string
+	path  string
 )
 
 func main() {
@@ -46,6 +49,7 @@ func main() {
 	flag.StringVar(&token, "t", "", "")
 	flag.IntVar(&gap, "g", 1, "")
 	flag.StringVar(&proxy, "x", "", "")
+	flag.StringVar(&path, "f", "", "")
 	flag.Parse()
 
 	w := Work{
@@ -54,6 +58,7 @@ func main() {
 		Token: token,
 		Gap:   gap,
 		Proxy: proxy,
+		Path:  path,
 	}
 	w.Platform = make(map[string]map[string]currentPrice)
 	w.NotifyCount = make(map[string]int)
@@ -89,6 +94,7 @@ type Work struct {
 	NotifyCount map[string]int
 	Gap         int
 	Proxy       string
+	Path        string
 }
 type currentPrice struct {
 	Symbol string
@@ -368,6 +374,7 @@ func (w *Work) runWorkerHuobi() {
 						return true // keep iterating
 					})
 					w.setNotify("huobi", 0)
+					w.save(string(retrunJson("ok", true, w.Platform["huobi"])), "huobi")
 				} else {
 					log.Println("[huobi] data nil")
 					w.incrNotify("huobi")
@@ -429,6 +436,7 @@ func (w *Work) runWorkerOkex() {
 			return true // keep iterating
 		})
 		w.setNotify("okex", 0)
+		w.save(string(body), "okex")
 	} else {
 		log.Println("[okex] data nil")
 		w.incrNotify("okex")
@@ -489,6 +497,7 @@ func (w *Work) runWorkerBinance() {
 			return true // keep iterating
 		})
 		w.setNotify("binance", 0)
+		w.save(string(body), "binance")
 	} else {
 		log.Println("[binance] data nil")
 		w.incrNotify("binance")
@@ -546,6 +555,7 @@ func (w *Work) runWorkerGate() {
 			return true // keep iterating
 		})
 		w.setNotify("gate", 0)
+		w.save(string(body), "gate")
 	} else {
 		log.Println("[gate] data nil")
 		w.incrNotify("gate")
@@ -603,6 +613,7 @@ func (w *Work) runWorkerZb() {
 			return true // keep iterating
 		})
 		w.setNotify("zb", 0)
+		w.save(string(body), "zb")
 	} else {
 		log.Println("[zb] data nil")
 		w.incrNotify("zb")
@@ -618,4 +629,21 @@ func (w *Work) notify(text string, desp string) error {
 	}
 	log.Println("[notify] no token")
 	return errors.New("no notify token")
+}
+
+func (w *Work) save(text string, file string) {
+	if len(w.Path) > 0 {
+		var f *os.File
+		var err1 error
+		filename := w.Path + "/" + file + ".json"
+
+		f, err1 = os.OpenFile(filename, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0664)
+		defer f.Close()
+
+		_, err1 = io.WriteString(f, text+"\n")
+		if err1 != nil {
+			log.Println("[save] write fail", err1.Error())
+			return
+		}
+	}
 }

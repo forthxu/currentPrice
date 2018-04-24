@@ -1,5 +1,5 @@
 proxy_cache cache_one;
-proxy_cache_valid  200 304 2s;
+proxy_cache_valid  200 304 3s;
 proxy_cache_key $host$uri$is_args$args;
 
 proxy_ignore_headers Set-Cookie;

@@ -16,6 +16,7 @@ test:
 	$(GOTEST) -v ./...
 clean:
 	$(GOCLEAN)
+	rm -f *.json
 	rm -f $(BINARY_NAME)
 	rm -f $(BINARY_MAC)
 	rm -f $(BINARY_LINUX)
