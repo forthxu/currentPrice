@@ -80,9 +80,9 @@ func retrunJson(msg string, status bool, data interface{}) []byte {
 }
 
 type Result struct {
-	Status bool
-	Msg    string
-	Data   interface{}
+	Status bool        `json:"status"`
+	Msg    string      `json:"msg"`
+	Data   interface{} `json:"data"`
 }
 
 //工作线程
@@ -97,11 +97,11 @@ type Work struct {
 	Path        string
 }
 type currentPrice struct {
-	Symbol string
-	Coin   string
-	Market string
-	Price  string
-	Time   string
+	Symbol string `json:"symbol"`
+	Coin   string `json:"coin"`
+	Market string `json:"market"`
+	Price  string `json:"price"`
+	Time   string `json:"time"`
 }
 
 //http线程
