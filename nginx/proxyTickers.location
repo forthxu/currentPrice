@@ -1,0 +1,14 @@
+proxy_cache cache_one;
+proxy_cache_valid  200 304 2s;
+proxy_cache_key $host$uri$is_args$args;
+
+proxy_ignore_headers Set-Cookie;
+add_header  Nginx-Cache "$upstream_cache_status";
+
+add_header Access-Control-Allow-Origin *;
+add_header Access-Control-Allow-Credentials true;
+
+proxy_set_header Host $proxy_host;
+proxy_pass_header X-XSRF-TOKEN;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
