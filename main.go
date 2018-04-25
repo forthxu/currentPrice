@@ -68,6 +68,7 @@ func main() {
 	log.Println("proxy:", w.Proxy)
 	w.runWorkers()
 	w.RunHttp()
+	w.notify("[currentPrice] 程序结束", "")
 }
 
 //返回结果处理
@@ -189,6 +190,7 @@ func (w *Work) runWorkers() {
 			}
 			//log.Println("[okex] huobi websocket reconnecting", w.getNotify("huobi"))
 		}
+		w.notify("[huobi] 协程结束", "")
 	}()
 
 	go func() {
@@ -204,6 +206,7 @@ func (w *Work) runWorkers() {
 			}
 			//log.Println("[okex] http get", w.getNotify("okex"))
 		}
+		w.notify("[okex] 协程结束", "")
 	}()
 
 	go func() {
@@ -219,6 +222,7 @@ func (w *Work) runWorkers() {
 			}
 			//log.Println("[binance] http get", w.getNotify("binance"))
 		}
+		w.notify("[binance] 协程结束", "")
 	}()
 
 	go func() {
@@ -234,6 +238,7 @@ func (w *Work) runWorkers() {
 			}
 			//log.Println("[gate] http get", w.getNotify("gate"))
 		}
+		w.notify("[gate] 协程结束", "")
 	}()
 
 	go func() {
@@ -249,6 +254,7 @@ func (w *Work) runWorkers() {
 			}
 			//log.Println("[zb] http get", w.getNotify("zb"))
 		}
+		w.notify("[zb] 协程结束", "")
 	}()
 }
 
@@ -331,7 +337,7 @@ func (w *Work) runWorkerHuobi() {
 		if err != nil {
 			log.Println("[huobi] ws read err:", err)
 			w.incrNotify("huobi")
-			continue
+			break
 		}
 		msg, err := GzipDecode(originMsg)
 		if err != nil {
@@ -613,7 +619,7 @@ func (w *Work) runWorkerZb() {
 			return true // keep iterating
 		})
 		w.setNotify("zb", 0)
-		w.save(string(body), "zb")
+		w.save(strings.Trim(string(body), "()"), "zb")
 	} else {
 		log.Println("[zb] data nil")
 		w.incrNotify("zb")
