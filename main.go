@@ -332,17 +332,28 @@ func (w *Work) runWorkerHuobi() {
 	log.Println("[huobi] huobi websocket connected")
 
 	//数据
+	var i int = 0
 	for {
+		//多次出错后重连
+		if i > 100 {
+			log.Println("[huobi] too many err:", i)
+			break
+		}
+
+		//阻塞读取数据
 		_, originMsg, err := ws.ReadMessage()
 		if err != nil {
 			log.Println("[huobi] ws read err:", err)
 			w.incrNotify("huobi")
-			break
+			i = i + 30
+			continue
 		}
+		//解压数据
 		msg, err := GzipDecode(originMsg)
 		if err != nil {
 			log.Println("[huobi] gzip decode err:", err)
 			w.incrNotify("huobi")
+			i = i + 10
 			continue
 		}
 
@@ -350,6 +361,7 @@ func (w *Work) runWorkerHuobi() {
 			if err := ws.WriteMessage(websocket.TextMessage, []byte(strings.Replace(string(msg), "ping", "pong", 1))); err != nil {
 				log.Println("[huobi] ws pong err:", err)
 				w.incrNotify("huobi")
+				i = i + 10
 				continue
 			}
 		} else {
@@ -357,6 +369,7 @@ func (w *Work) runWorkerHuobi() {
 				if !gjson.Valid(string(msg)) {
 					log.Println("[huobi] invalid json")
 					w.incrNotify("huobi")
+					i = i + 5
 					continue
 				}
 				result := gjson.GetBytes(msg, "data")
@@ -380,10 +393,12 @@ func (w *Work) runWorkerHuobi() {
 						return true // keep iterating
 					})
 					w.setNotify("huobi", 0)
+					i = 0
 					w.save(string(retrunJson("ok", true, w.Platform["huobi"])), "huobi")
 				} else {
 					log.Println("[huobi] data nil")
 					w.incrNotify("huobi")
+					i = i + 5
 				}
 			}
 		}
@@ -393,7 +408,7 @@ func (w *Work) runWorkerHuobi() {
 
 func (w *Work) runWorkerOkex() {
 	client := &http.Client{
-		Timeout: time.Duration(5) * time.Second,
+		Timeout: time.Duration(8) * time.Second,
 	}
 
 	var req *http.Request
