@@ -3,3 +3,4 @@ currentPrice
 currentPrice.*
 *.json
 *.ini
+run.sh

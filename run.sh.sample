@@ -1,0 +1,110 @@
+#!/bin/bash
+PATH=/usr/local/bin:/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/sbin
+
+# 定时命令
+# * * * * * root run.sh care >> care.log 2>&1
+
+# 工作目录
+WORKDIR=$(cd $(dirname $0); pwd)
+if [ "$(uname)" == "Darwin" ];then
+	SP="/"
+elif [ "$(expr substr $(uname -s) 1 5)" == "Linux" ];then
+	SP="/"
+elif [ "$(expr substr $(uname -s) 1 10)" == "MINGW32_NT" ];then
+	SP="\\"
+fi
+
+# Server酱(http://sc.ftqq.com/3.version) token
+TOKEN=""
+
+# 操作对象
+op='none'
+if [ -n "$1" ];then
+	op=$1
+fi
+
+# 进程数
+count()
+{
+	echo `ps  aux | grep 'currentPrice' | grep -v 'grep' | wc -l`;
+}
+# 运行程序
+run()
+{
+	#设置日志存储
+	DATA_DAY=`date +%Y-%m-%d`
+	DATA_SECOND=`date +%Y-%m-%d-%H-%M-%S`
+	LOG_NAME="${WORKDIR}${SP}log_${DATA_DAY}.log"
+	BACKUP_LOG_NAME="${WORKDIR}${SP}log_${DATA_SECOND}_bak.log"
+	#备份日志
+	if [ -a "${LOG_NAME}" ]; then
+		mv ${LOG_NAME} ${BACKUP_LOG_NAME}
+	fi
+
+	nohup $@ >> ${LOG_NAME} 2>&1 &
+
+	echo "运行程序："
+	echo "pid:$!  log:${LOG_NAME} "
+	return $!
+}
+# 开始函数
+start()
+{
+	if [ "$(uname)" == "Darwin" ];then
+		run ./currentPrice.app -f config.ini
+	elif [ "$(expr substr $(uname -s) 1 5)" == "Linux" ];then
+		run ./currentPrice.bin -f config.ini
+	elif [ "$(expr substr $(uname -s) 1 10)" == "MINGW32_NT" ];then
+		run ./currentPrice.exe -f config.ini
+	fi
+	return $!
+}
+# 结束函数
+stop()
+{
+	num=`count`
+	while [ $num -gt 0 ]; do
+		echo "当前进程数："$num
+	    ps  aux | grep 'currentPrice' | grep -v 'grep' | awk '{print $2}' | xargs -I {} kill -9 {}
+	    num=`count`
+	done
+	echo "当前进程数："$num
+
+	return $!
+}
+# 消息通知函数
+notify()
+{
+	curl -o /dev/null -s "https://sc.ftqq.com/${TOKEN}.send?text=$1";
+}
+
+# 操作
+case $op in 
+	care) 
+		num=`count`
+		if [ $num -lt 1 ];then
+			start
+			notify "现价接口挂掉重启~"
+			echo "care finish" 
+		fi;
+	;;
+	start | begin) 
+		start
+		echo "start finish" 
+	;; 
+	stop | end) 
+		stop
+		echo "stop finish" 
+	;;
+	restart | reload) 
+		stop
+		start
+		echo "restart finish" 
+	;; 
+	status) 
+		echo "进程数：" `count`
+	;;
+	*) 
+		echo $0" [start|stop|restart|status|care]" 
+	;; 
+esac 

@@ -21,6 +21,7 @@ clean:
 	rm -f $(BINARY_MAC)
 	rm -f $(BINARY_LINUX)
 	rm -f $(BINARY_WINDOWS)
+	rm -f *.log
 run:
 	$(GOBUILD) -o $(BINARY_NAME) -v ./...
 	./$(BINARY_NAME)
