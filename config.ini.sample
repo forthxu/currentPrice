@@ -1,0 +1,12 @@
+[redis]
+host: 127.0.0.1
+port: 6379
+db: 0
+auth: 
+[app]
+host: 127.0.0.1
+port: 9999
+token: 
+gap: 1
+porxy: 
+outdir: 
