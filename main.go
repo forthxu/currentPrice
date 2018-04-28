@@ -204,7 +204,7 @@ func (w *Work) CurrentRank(resp http.ResponseWriter, req *http.Request) {
 	var data3 [][]byte
 	var err error
 	if change == "down" {
-		data3, err = w.Redis.Zrangebyscore("currentRank", float64(0), float64(1000), 0, 10)
+		data3, err = w.Redis.Zrangebyscore("currentRank", float64(-1000), float64(0), 0, 10)
 	} else {
 		data3, err = w.Redis.Zrevrangebyscore("currentRank", float64(1000), float64(0), 0, 10)
 	}

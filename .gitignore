@@ -3,4 +3,5 @@ currentPrice
 currentPrice.*
 *.json
 *.ini
+*.log
 run.sh
