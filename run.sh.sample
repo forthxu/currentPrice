@@ -13,6 +13,7 @@ elif [ "$(expr substr $(uname -s) 1 5)" == "Linux" ];then
 elif [ "$(expr substr $(uname -s) 1 10)" == "MINGW32_NT" ];then
 	SP="\\"
 fi
+echo $WORKDIR
 
 # Server酱(http://sc.ftqq.com/3.version) token
 TOKEN=""
@@ -26,16 +27,19 @@ fi
 # 进程数
 count()
 {
-	echo `ps  aux | grep 'currentPrice' | grep -v 'grep' | wc -l`;
+	echo `ps  aux | grep 'currentPrice' | grep 'config.ini' | grep -v 'grep' | wc -l`;
 }
 # 运行程序
 run()
 {
 	#设置日志存储
-	DATA_DAY=`date +%Y-%m-%d`
-	DATA_SECOND=`date +%Y-%m-%d-%H-%M-%S`
-	LOG_NAME="${WORKDIR}${SP}log_${DATA_DAY}.log"
-	BACKUP_LOG_NAME="${WORKDIR}${SP}log_${DATA_SECOND}_bak.log"
+	if [ ! -d "${WORKDIR}${SP}log" ]; then
+		mkdir "${WORKDIR}${SP}log"
+	fi
+	local DATA_DAY=`date +%Y-%m-%d`
+	local DATA_SECOND=`date +%Y-%m-%d-%H-%M-%S`
+	local LOG_NAME="${WORKDIR}${SP}log${SP}${DATA_DAY}.log"
+	local BACKUP_LOG_NAME="${WORKDIR}${SP}log${SP}${DATA_SECOND}_bak.log"
 	#备份日志
 	if [ -a "${LOG_NAME}" ]; then
 		mv ${LOG_NAME} ${BACKUP_LOG_NAME}
@@ -43,7 +47,7 @@ run()
 
 	nohup $@ >> ${LOG_NAME} 2>&1 &
 
-	echo "运行程序："
+	echo "运行程序："$@
 	echo "pid:$!  log:${LOG_NAME} "
 	return $!
 }
@@ -62,7 +66,7 @@ start()
 # 结束函数
 stop()
 {
-	num=`count`
+	local num=`count`
 	while [ $num -gt 0 ]; do
 		echo "当前进程数："$num
 	    ps  aux | grep 'currentPrice' | grep -v 'grep' | awk '{print $2}' | xargs -I {} kill -9 {}
@@ -78,6 +82,16 @@ notify()
 	curl -o /dev/null -s "https://sc.ftqq.com/${TOKEN}.send?text=$1";
 }
 
+# pika
+pikaCount()
+{
+	echo `ps  aux | grep 'pika' | grep -v 'grep' | wc -l`;
+}
+pikaStart()
+{
+	cd $WORKDIR && /home/huwei/output/bin/pika -c /home/huwei/output/conf/pika.conf;
+}
+
 # 操作
 case $op in 
 	care) 
@@ -85,6 +99,12 @@ case $op in
 		if [ $num -lt 1 ];then
 			start
 			notify "现价接口挂掉重启~"
+			echo "care finish" 
+		fi;
+		numPika=`pikaCount`
+		if [ $numPika -lt 1 ];then
+			pikaStart
+			notify "pika挂掉重启~"
 			echo "care finish" 
 		fi;
 	;;
@@ -102,7 +122,8 @@ case $op in
 		echo "restart finish" 
 	;; 
 	status) 
-		echo "进程数：" `count`
+		echo "currentPrice进程数：" `count`
+		echo "pika进程数：" `pikaCount`
 	;;
 	*) 
 		echo $0" [start|stop|restart|status|care]" 

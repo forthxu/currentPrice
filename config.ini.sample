@@ -2,11 +2,12 @@
 host: 127.0.0.1
 port: 6379
 db: 0
-auth: 
+auth:
 [app]
 host: 127.0.0.1
 port: 9999
-token: 
-gap: 1
-proxy: 
+token:
+gap:1
+savegap:30
+proxy:
 outdir: 

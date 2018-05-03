@@ -29,7 +29,8 @@ Options are:
     -h host     host for listen
     -p port     port for listen
     -t token    notify token for Server酱[http://sc.ftqq.com/3.version]
-    -g gap      time gap for get data
+    -g gap      time gap for get data and save file
+    -s saveGap  time gap for save history data with redis
     -x proxy    default no use proxy
     -o outDir   dir to save origin data
     -f configFile     General configuration file
@@ -39,6 +40,7 @@ var (
 	port       int
 	token      string
 	gap        int
+	savegap    int
 	proxy      string
 	outDir     string
 	configFile string
@@ -55,6 +57,7 @@ func main() {
 	flag.IntVar(&port, "p", 9999, "")
 	flag.StringVar(&token, "t", "", "")
 	flag.IntVar(&gap, "g", 1, "")
+	flag.IntVar(&savegap, "s", 60, "")
 	flag.StringVar(&proxy, "x", "", "")
 	flag.StringVar(&outDir, "o", "", "")
 	flag.StringVar(&configFile, "f", "", "")
@@ -91,6 +94,9 @@ func main() {
 			if data, err := cfg.Int("app", "gap"); err == nil {
 				gap = data
 			}
+			if data, err := cfg.Int("app", "savegap"); err == nil {
+				savegap = data
+			}
 			if data, err := cfg.String("app", "proxy"); err == nil {
 				proxy = data
 			}
@@ -106,8 +112,9 @@ func main() {
 		Port:        port,
 		Token:       token,
 		Gap:         gap,
+		SaveGap:     savegap,
 		Proxy:       proxy,
-		Outdir:      outDir,
+		OutDir:      outDir,
 		RedisConfig: redisConfig,
 	}
 	w.Platform = make(map[string]map[string]currentPrice)
@@ -116,8 +123,9 @@ func main() {
 
 	log.Println("[app] listen:", w.Host, w.Port)
 	log.Println("[app] gap time:", w.Gap, "second")
+	log.Println("[app] savegap time:", w.SaveGap, "second")
 	log.Println("[app] proxy:", w.Proxy)
-	log.Println("[app] outDir:", w.Outdir)
+	log.Println("[app] outDir:", w.OutDir)
 	w.initRedis()
 	w.runWorkers()
 	w.RunHttp()
@@ -130,26 +138,27 @@ func (w *Work) initRedis() {
 	w.Redis.Addr = w.RedisConfig["host"] + ":" + w.RedisConfig["port"]
 	redisdb, err := strconv.Atoi(w.RedisConfig["db"])
 	if err != nil {
-		fmt.Println("redis config error")
+		log.Fatalln("[redis] config select db error")
 	}
 	w.Redis.Db = redisdb
 	w.Redis.Password = w.RedisConfig["auth"]
 
 	_, err = w.Redis.Ping()
 	if err != nil {
-		fmt.Println(err)
+		log.Fatalln("[redis] ping ", err)
 	}
 }
 
-//http线程返回结果结构
+//http线程返回结果结构函数
 func retrunJson(msg string, status bool, data interface{}) []byte {
 	b, err := json.Marshal(Result{status, msg, data})
 	if err != nil {
-		log.Println("[retrunJson] ", err)
+		log.Println("[retrunJson] Marshal", err)
 	}
 	return b
 }
 
+//http线程返回结果结构
 type Result struct {
 	Status bool        `json:"status"`
 	Msg    string      `json:"msg"`
@@ -165,11 +174,14 @@ type Work struct {
 	Platform24  map[string]map[string]currentPrice
 	NotifyCount map[string]int
 	Gap         int
+	SaveGap     int
 	Proxy       string
-	Outdir      string
+	OutDir      string
 	RedisConfig map[string]string
 	Redis       goredis.Client
 }
+
+//数据格式
 type currentPrice struct {
 	Symbol  string  `json:"symbol"`
 	Coin    string  `json:"coin"`
@@ -183,34 +195,41 @@ type currentPrice struct {
 
 //http线程
 func (w *Work) RunHttp() {
+	// 涨跌幅排行榜
 	http.HandleFunc("/api/currentPrices/", w.CurrentPrices)
+	// 现价
 	http.HandleFunc("/api/currentRank/", w.CurrentRank)
+
 	listen := (w.Host + ":" + strconv.Itoa(w.Port))
 	err := http.ListenAndServe(listen, nil)
 	if err != nil {
-		log.Println("[http] ListenAndServe: ", err)
+		log.Fatalln("[http] ListenAndServe: ", err)
 		return
 	}
 	log.Println("[http] start ", w.Host, w.Port)
 }
+
+//http线程涨跌幅排行榜接口函数
 func (w *Work) CurrentRank(resp http.ResponseWriter, req *http.Request) {
+	//up涨榜 down跌榜
 	req.ParseForm()
 	var change string = "up"
 	if len(req.Form["change"]) > 0 && len(req.Form["change"][0]) > 0 {
 		change = req.Form["change"][0]
 	}
 
+	//获取涨跌榜对象
 	var markets map[int]string = make(map[int]string)
-	var data3 [][]byte
+	var data [][]byte
 	var err error
 	if change == "down" {
-		data3, err = w.Redis.Zrangebyscore("currentRank", float64(-1000), float64(0), 0, 10)
+		data, err = w.Redis.Zrangebyscore("currentRank", float64(-100), float64(-0.00000000000000000001), 0, 10)
 	} else {
-		data3, err = w.Redis.Zrevrangebyscore("currentRank", float64(1000), float64(0), 0, 10)
+		data, err = w.Redis.Zrevrangebyscore("currentRank", float64(100), float64(0.00000000000000000001), 0, 10)
 	}
 
 	if err == nil {
-		for k, v := range data3 {
+		for k, v := range data {
 			if k%2 == 0 {
 				markets[k] = string(v)
 			}
@@ -220,6 +239,7 @@ func (w *Work) CurrentRank(resp http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	//根据涨跌榜对象获取涨跌榜数据
 	var resultData map[string]map[string]currentPrice = make(map[string]map[string]currentPrice)
 	for _, marketValue := range markets {
 		tmp := strings.Split(strings.Trim(strings.ToLower(marketValue), " "), "|")
@@ -246,12 +266,15 @@ func (w *Work) CurrentRank(resp http.ResponseWriter, req *http.Request) {
 			log.Println("[currentRank] symbol no exist", symbol)
 		}
 	}
+
 	resp.Write(retrunJson("ok", true, resultData))
 }
+
+// http线程现价接口函数
 func (w *Work) CurrentPrices(resp http.ResponseWriter, req *http.Request) {
 	req.ParseForm()
 
-	if len(req.Form["markets[]"]) > 0 && len(req.Form["markets[]"][0]) > 0 {
+	if len(req.Form["markets[]"]) > 0 && len(req.Form["markets[]"][0]) > 0 { //指定市场对
 		markets := req.Form["markets[]"]
 		var resultData map[string]map[string]currentPrice = make(map[string]map[string]currentPrice)
 		for marketIndex := range markets {
@@ -278,7 +301,7 @@ func (w *Work) CurrentPrices(resp http.ResponseWriter, req *http.Request) {
 		}
 		resp.Write(retrunJson("ok", true, resultData))
 		return
-	} else if len(req.Form["site"]) > 0 && len(req.Form["site"][0]) > 0 {
+	} else if len(req.Form["site"]) > 0 && len(req.Form["site"][0]) > 0 { //指定平台
 		site := req.Form["site"][0]
 		data, platformExist := w.Platform[site]
 		if !platformExist {
@@ -287,7 +310,7 @@ func (w *Work) CurrentPrices(resp http.ResponseWriter, req *http.Request) {
 		}
 
 		var resultData map[string]map[string]currentPrice = make(map[string]map[string]currentPrice)
-		if len(req.Form["market"]) > 0 && len(req.Form["market"][0]) > 0 {
+		if len(req.Form["market"]) > 0 && len(req.Form["market"][0]) > 0 { //同时指定了市场
 			market := strings.ToLower(req.Form["market"][0])
 			resultData[site] = make(map[string]currentPrice)
 			for k, v := range data {
@@ -297,7 +320,7 @@ func (w *Work) CurrentPrices(resp http.ResponseWriter, req *http.Request) {
 			}
 			resp.Write(retrunJson("ok", true, resultData))
 			return
-		} else {
+		} else { //平台内所有市场对
 			resultData[site] = data
 			resp.Write(retrunJson("ok", true, resultData))
 			return
@@ -308,15 +331,18 @@ func (w *Work) CurrentPrices(resp http.ResponseWriter, req *http.Request) {
 	resp.Write(retrunJson("site invail", false, nil))
 }
 
-//工作线程
+//工作线程，分协程读取个平台现价、存储涨跌幅、存储平台现价文件，存储历史现价
 func (w *Work) runWorkers() {
+
+	// huobi websocket 实时读取推送过来的数据
 	go func() {
 		w.Platform["huobi"] = make(map[string]currentPrice)
 		w.setNotify("huobi", 0)
 		for {
 			w.runWorkerHuobi()
+			// 超过5次错误后休息一分钟
 			if w.getNotify("huobi") > 5 {
-				w.notify("[huobi] currentPrice fail", "")
+				w.notify("[huobi] currentPrice fail", "读取现价接口超过五次错误休息一分钟")
 				w.setNotify("huobi", 0)
 				time.Sleep(60 * time.Second)
 			}
@@ -325,70 +351,79 @@ func (w *Work) runWorkers() {
 		w.notify("[huobi] 协程结束", "")
 	}()
 
+	// okex http
 	go func() {
 		w.Platform["okex"] = make(map[string]currentPrice)
 		w.setNotify("okex", 0)
 		ticker := time.NewTicker(time.Duration(w.Gap) * time.Second)
 		for range ticker.C {
 			w.runWorkerOkex()
+			// 超过10次错误后休息两分钟
 			if w.getNotify("okex") > 10 {
-				w.notify("[okex] currentPrice fail", "")
+				w.notify("[okex] currentPrice fail", "读取现价接口超过十次错误休息两分钟")
 				w.setNotify("okex", 0)
-				time.Sleep(180 * time.Second)
+				time.Sleep(120 * time.Second)
 			}
 			//log.Println("[okex] http get", w.getNotify("okex"))
 		}
 		w.notify("[okex] 协程结束", "")
 	}()
 
+	// binance http
 	go func() {
 		w.Platform["binance"] = make(map[string]currentPrice)
 		w.setNotify("binance", 0)
 		ticker := time.NewTicker(time.Duration(w.Gap) * time.Second)
 		for range ticker.C {
 			w.runWorkerBinance()
+			// 超过10次错误后休息两分钟
 			if w.getNotify("binance") > 10 {
-				w.notify("[binance] currentPrice fail", "")
+				w.notify("[binance] currentPrice fail", "读取现价接口超过十次错误休息两分钟")
 				w.setNotify("binance", 0)
-				time.Sleep(180 * time.Second)
+				time.Sleep(120 * time.Second)
 			}
 			//log.Println("[binance] http get", w.getNotify("binance"))
 		}
 		w.notify("[binance] 协程结束", "")
 	}()
 
+	// gate http
 	go func() {
 		w.Platform["gate"] = make(map[string]currentPrice)
 		w.setNotify("gate", 0)
 		ticker := time.NewTicker(time.Duration(w.Gap) * time.Second)
 		for range ticker.C {
 			w.runWorkerGate()
+			// 超过10次错误后休息两分钟
 			if w.getNotify("gate") > 10 {
-				w.notify("[gate] currentPrice fail", "")
+				w.notify("[gate] currentPrice fail", "读取现价接口超过十次错误休息两分钟")
 				w.setNotify("gate", 0)
-				time.Sleep(180 * time.Second)
+				time.Sleep(120 * time.Second)
 			}
 			//log.Println("[gate] http get", w.getNotify("gate"))
 		}
 		w.notify("[gate] 协程结束", "")
 	}()
 
+	// zb http
 	go func() {
 		w.Platform["zb"] = make(map[string]currentPrice)
 		w.setNotify("zb", 0)
 		ticker := time.NewTicker(time.Duration(w.Gap) * time.Second)
 		for range ticker.C {
 			w.runWorkerZb()
+			// 超过10次错误后休息两分钟
 			if w.getNotify("zb") > 10 {
-				w.notify("[zb] currentPrice fail", "")
+				w.notify("[zb] currentPrice fail", "读取现价接口超过十次错误休息两分钟")
 				w.setNotify("zb", 0)
-				time.Sleep(180 * time.Second)
+				time.Sleep(120 * time.Second)
 			}
 			//log.Println("[zb] http get", w.getNotify("zb"))
 		}
 		w.notify("[zb] 协程结束", "")
 	}()
 
+	// 存储历史现价
 	go func() {
 		w.Platform24["huobi"] = make(map[string]currentPrice)
 		w.Platform24["okex"] = make(map[string]currentPrice)
@@ -397,7 +432,7 @@ func (w *Work) runWorkers() {
 		w.Platform24["zb"] = make(map[string]currentPrice)
 
 		var storeKey string = "currentZset"
-		ticker := time.NewTicker(time.Duration(10) * time.Second)
+		ticker := time.NewTicker(time.Duration(10) * time.Second) //存储时间间隔由配置决定
 		for range ticker.C {
 			var now time.Time = time.Now()
 
@@ -411,7 +446,7 @@ func (w *Work) runWorkers() {
 				w.Redis.Zadd(storeKey, []byte(encodeBuffer.String()), float64(now.Unix()))
 			}
 
-			//获取
+			//获取24小时历史现价，供涨跌幅计算
 			data1, err := w.Redis.Zrevrangebyscore(storeKey, float64(now.Unix()-86400), float64(now.Unix()-96400), 0, 1)
 			if err == nil && len(data1) == 2 {
 				dec := gob.NewDecoder(bytes.NewBuffer(data1[0]))
@@ -439,6 +474,7 @@ func (w *Work) runWorkers() {
 	}()
 }
 
+// 计数器用来计数通知和任务休息
 func (w *Work) incrNotify(site string) {
 	_, siteExist := w.NotifyCount[site]
 	if siteExist {
@@ -458,6 +494,7 @@ func (w *Work) getNotify(site string) int {
 	return 0
 }
 
+// gzip压缩用于wesocket
 func GzipEncode(in []byte) ([]byte, error) {
 	var (
 		buffer bytes.Buffer
@@ -478,6 +515,7 @@ func GzipEncode(in []byte) ([]byte, error) {
 	return buffer.Bytes(), nil
 }
 
+// gzip解压用于wesocket
 func GzipDecode(in []byte) ([]byte, error) {
 	reader, err := gzip.NewReader(bytes.NewReader(in))
 	if err != nil {
@@ -488,7 +526,10 @@ func GzipDecode(in []byte) ([]byte, error) {
 
 	return ioutil.ReadAll(reader)
 }
+
+// huobi现价
 func (w *Work) runWorkerHuobi() {
+	//连接websocket
 	var u url.URL
 	if len(w.Proxy) == 0 {
 		u = url.URL{Scheme: "ws", Host: "api.huobi.pro", Path: "/ws"}
@@ -504,7 +545,7 @@ func (w *Work) runWorkerHuobi() {
 	}
 	defer ws.Close()
 
-	//订阅
+	//订阅现价数据
 	err = ws.WriteMessage(websocket.TextMessage, []byte("{\"sub\":\"market.overview\"}"))
 	if err != nil {
 		log.Println("[huobi] ", err)
@@ -513,7 +554,7 @@ func (w *Work) runWorkerHuobi() {
 	log.Println("[huobi] huobi websocket connected")
 
 	//数据
-	var i int = 0
+	var i int = 0 //用于计算websocket出错次数
 	for {
 		//多次出错后重连
 		if i > 100 {
@@ -538,7 +579,7 @@ func (w *Work) runWorkerHuobi() {
 			continue
 		}
 
-		if strings.Contains(string(msg), "ping") {
+		if strings.Contains(string(msg), "ping") { //心跳
 			if err := ws.WriteMessage(websocket.TextMessage, []byte(strings.Replace(string(msg), "ping", "pong", 1))); err != nil {
 				log.Println("[huobi] ws pong err:", err)
 				w.incrNotify("huobi")
@@ -555,6 +596,7 @@ func (w *Work) runWorkerHuobi() {
 				}
 				result := gjson.GetBytes(msg, "data")
 				if result.Exists() {
+					//现价数据
 					result.ForEach(func(key, value gjson.Result) bool {
 						symbol := strings.ToLower(value.Get("symbol").String())
 						coin := symbol[0 : len(symbol)-4]
@@ -588,8 +630,11 @@ func (w *Work) runWorkerHuobi() {
 						}
 						return true // keep iterating
 					})
+					//错误计数归零
 					w.setNotify("huobi", 0)
+					//wesocket错误计数归零
 					i = 0
+					//保存现价数据为文件
 					w.save(string(retrunJson("ok", true, w.Platform["huobi"])), "huobi")
 				} else {
 					log.Println("[huobi] data nil")
@@ -602,7 +647,9 @@ func (w *Work) runWorkerHuobi() {
 	}
 }
 
+// okex现价
 func (w *Work) runWorkerOkex() {
+	// 现价接口
 	client := &http.Client{
 		Timeout: time.Duration(8) * time.Second,
 	}
@@ -630,6 +677,7 @@ func (w *Work) runWorkerOkex() {
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
 
+	// 数据处理
 	if !gjson.Valid(string(body)) {
 		log.Println("[okex] invalid json")
 		w.incrNotify("okex")
@@ -637,9 +685,15 @@ func (w *Work) runWorkerOkex() {
 	}
 	result := gjson.GetBytes(body, "data")
 	if result.Exists() {
+		// 处理现价
 		result.ForEach(func(key, value gjson.Result) bool {
 			symbol := strings.ToLower(value.Get("symbol").String())
 			tmp := strings.Split(symbol, "_")
+			if len(tmp) != 2 {
+				log.Println("[okex] invalid symbol", symbol)
+				w.incrNotify("okex")
+				return true
+			}
 			coin := tmp[0]
 			market := tmp[1]
 			now := time.Now().Format("20060102150405")
@@ -667,7 +721,9 @@ func (w *Work) runWorkerOkex() {
 			}
 			return true // keep iterating
 		})
+		//错误计数归零
 		w.setNotify("okex", 0)
+		//保存现价数据为文件
 		w.save(string(body), "okex")
 	} else {
 		log.Println("[okex] data nil")
@@ -675,7 +731,9 @@ func (w *Work) runWorkerOkex() {
 	}
 }
 
+// binance现价
 func (w *Work) runWorkerBinance() {
+	// 现价接口
 	client := &http.Client{
 		Timeout: time.Duration(5) * time.Second,
 	}
@@ -703,6 +761,7 @@ func (w *Work) runWorkerBinance() {
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
 
+	// 数据处理
 	if !gjson.Valid(string(body)) {
 		log.Println("[binance] invalid json")
 		w.incrNotify("binance")
@@ -710,6 +769,7 @@ func (w *Work) runWorkerBinance() {
 	}
 	result := gjson.Parse(string(body))
 	if result.Exists() {
+		// 现价数据
 		result.ForEach(func(key, value gjson.Result) bool {
 			symbol := strings.ToLower(value.Get("symbol").String())
 			coin := symbol[0 : len(symbol)-4]
@@ -743,7 +803,9 @@ func (w *Work) runWorkerBinance() {
 			}
 			return true // keep iterating
 		})
+		//错误计数归零
 		w.setNotify("binance", 0)
+		//保存现价数据为文件
 		w.save(string(body), "binance")
 	} else {
 		log.Println("[binance] data nil")
@@ -751,7 +813,9 @@ func (w *Work) runWorkerBinance() {
 	}
 }
 
+// okex现价
 func (w *Work) runWorkerGate() {
+	// 现价接口
 	client := &http.Client{
 		Timeout: time.Duration(5) * time.Second,
 	}
@@ -779,6 +843,7 @@ func (w *Work) runWorkerGate() {
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
 
+	// 数据处理
 	if !gjson.Valid(string(body)) {
 		log.Println("[gate] invalid json")
 		w.incrNotify("gate")
@@ -786,9 +851,15 @@ func (w *Work) runWorkerGate() {
 	}
 	result := gjson.Parse(string(body))
 	if result.Exists() {
+		//现价数据
 		result.ForEach(func(key, value gjson.Result) bool {
 			symbol := strings.ToLower(key.String())
 			tmp := strings.Split(symbol, "_")
+			if len(tmp) != 2 {
+				log.Println("[gate] invalid symbol", symbol)
+				w.incrNotify("gate")
+				return true
+			}
 			coin := tmp[0]
 			market := tmp[1]
 			now := time.Now().Format("20060102150405")
@@ -816,7 +887,9 @@ func (w *Work) runWorkerGate() {
 			}
 			return true // keep iterating
 		})
+		//错误计数归零
 		w.setNotify("gate", 0)
+		//保存现价数据为文件
 		w.save(string(body), "gate")
 	} else {
 		log.Println("[gate] data nil")
@@ -824,9 +897,11 @@ func (w *Work) runWorkerGate() {
 	}
 }
 
+// zb现价
 func (w *Work) runWorkerZb() {
+	//现价接口
 	client := &http.Client{
-		Timeout: time.Duration(5) * time.Second,
+		Timeout: time.Duration(8) * time.Second,
 	}
 
 	var req *http.Request
@@ -852,6 +927,7 @@ func (w *Work) runWorkerZb() {
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
 
+	//数据处理
 	if !gjson.Valid(strings.Trim(string(body), "()")) {
 		log.Println("[zb] invalid json")
 		w.incrNotify("zb")
@@ -859,9 +935,15 @@ func (w *Work) runWorkerZb() {
 	}
 	result := gjson.Get(strings.Trim(string(body), "()"), "datas")
 	if result.Exists() {
+		//现价数据
 		result.ForEach(func(key, value gjson.Result) bool {
 			symbol := strings.ToLower(value.Get("market").String())
 			tmp := strings.Split(symbol, "/")
+			if len(tmp) != 2 {
+				log.Println("[zb] invalid symbol", symbol)
+				w.incrNotify("zb")
+				return true
+			}
 			coin := tmp[0]
 			market := tmp[1]
 			now := time.Now().Format("20060102150405")
@@ -889,7 +971,9 @@ func (w *Work) runWorkerZb() {
 			}
 			return true // keep iterating
 		})
+		//错误计数归零
 		w.setNotify("zb", 0)
+		//保存现价数据为文件
 		w.save(strings.Trim(string(body), "()"), "zb")
 	} else {
 		log.Println("[zb] data nil")
@@ -897,6 +981,7 @@ func (w *Work) runWorkerZb() {
 	}
 }
 
+//信息通知函数
 func (w *Work) notify(text string, desp string) error {
 	if len(w.Token) > 0 {
 		url := fmt.Sprintf("https://sc.ftqq.com/%s.send?text=%s&desp=%s", url.QueryEscape(token), url.QueryEscape(text), url.QueryEscape(desp))
@@ -908,11 +993,12 @@ func (w *Work) notify(text string, desp string) error {
 	return errors.New("no notify token")
 }
 
+//数据保存为文件函数
 func (w *Work) save(text string, file string) {
-	if len(w.Outdir) > 0 {
+	if len(w.OutDir) > 0 {
 		var f *os.File
 		var err1 error
-		filename := w.Outdir + "/" + file + ".json"
+		filename := w.OutDir + "/" + file + ".json"
 
 		f, err1 = os.OpenFile(filename, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, 0664)
 		defer f.Close()
