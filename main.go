@@ -218,6 +218,11 @@ func (w *Work) CurrentRank(resp http.ResponseWriter, req *http.Request) {
 		change = req.Form["change"][0]
 	}
 
+	if len(req.Form["test"]) < 1 || len(req.Form["test"][0]) < 1 {
+		resp.Write(retrunJson("[currentRank] 暂时关闭旧接口", false, nil))
+		return
+	}
+
 	//获取涨跌榜对象
 	var markets map[int]string = make(map[int]string)
 	var data [][]byte
@@ -235,7 +240,7 @@ func (w *Work) CurrentRank(resp http.ResponseWriter, req *http.Request) {
 			}
 		}
 	} else {
-		resp.Write(retrunJson("found invail", false, nil))
+		resp.Write(retrunJson("[currentRank] found invail", false, nil))
 		return
 	}
 
@@ -244,7 +249,7 @@ func (w *Work) CurrentRank(resp http.ResponseWriter, req *http.Request) {
 	for _, marketValue := range markets {
 		tmp := strings.Split(strings.Trim(strings.ToLower(marketValue), " "), "|")
 		if len(tmp) != 3 {
-			resp.Write(retrunJson("markets invail", false, nil))
+			resp.Write(retrunJson("[currentRank] markets invail", false, nil))
 			return
 		}
 		symbol := tmp[0] + "-" + tmp[1]
@@ -280,7 +285,7 @@ func (w *Work) CurrentPrices(resp http.ResponseWriter, req *http.Request) {
 		for marketIndex := range markets {
 			tmp := strings.Split(strings.ToLower(markets[marketIndex]), "|")
 			if len(tmp) != 3 {
-				resp.Write(retrunJson("markets invail", false, nil))
+				resp.Write(retrunJson("[CurrentPrices] markets invail", false, nil))
 				return
 			}
 			symbol := tmp[0] + "-" + tmp[1]
@@ -305,7 +310,7 @@ func (w *Work) CurrentPrices(resp http.ResponseWriter, req *http.Request) {
 		site := req.Form["site"][0]
 		data, platformExist := w.Platform[site]
 		if !platformExist {
-			resp.Write(retrunJson("data invail", false, nil))
+			resp.Write(retrunJson("[CurrentPrices] data invail", false, nil))
 			return
 		}
 
@@ -328,7 +333,7 @@ func (w *Work) CurrentPrices(resp http.ResponseWriter, req *http.Request) {
 
 	}
 
-	resp.Write(retrunJson("site invail", false, nil))
+	resp.Write(retrunJson("[CurrentPrices] site invail", false, nil))
 }
 
 //工作线程，分协程读取个平台现价、存储涨跌幅、存储平台现价文件，存储历史现价
@@ -432,46 +437,63 @@ func (w *Work) runWorkers() {
 		w.Platform24["zb"] = make(map[string]currentPrice)
 
 		var storeKey string = "currentZset"
-		ticker := time.NewTicker(time.Duration(10) * time.Second) //存储时间间隔由配置决定
+		// 获取24小时历史现价，供涨跌幅计算
+		w.save24History(storeKey)
+
+		// 定时处理
+		ticker := time.NewTicker(time.Duration(w.SaveGap) * time.Second) //存储时间间隔由配置决定
 		for range ticker.C {
-			var now time.Time = time.Now()
-
-			//存储
-			var encodeBuffer bytes.Buffer
-			enc := gob.NewEncoder(&encodeBuffer)
-			err := enc.Encode(w.Platform)
-			if err != nil {
-				log.Println("[platform24] encode:", err)
-			} else {
-				w.Redis.Zadd(storeKey, []byte(encodeBuffer.String()), float64(now.Unix()))
-			}
-
-			//获取24小时历史现价，供涨跌幅计算
-			data1, err := w.Redis.Zrevrangebyscore(storeKey, float64(now.Unix()-86400), float64(now.Unix()-96400), 0, 1)
-			if err == nil && len(data1) == 2 {
-				dec := gob.NewDecoder(bytes.NewBuffer(data1[0]))
-				err = dec.Decode(&w.Platform24)
-				if err != nil {
-					log.Println("[platform24] decode data1:", err)
-				}
-				w.Redis.Zremrangebyscore(storeKey, float64(now.Unix()-96400), float64(now.Unix()-864000))
-			} else {
-				data2, err := w.Redis.Zrangebyscore(storeKey, float64(now.Unix()-86400), float64(now.Unix()), 0, 1)
-				if err == nil && len(data2) == 2 {
-					dec := gob.NewDecoder(bytes.NewBuffer(data2[0]))
-					err = dec.Decode(&w.Platform24)
-					if err != nil {
-						log.Println("[platform24] decode data2:", err)
-					}
-				} else {
-					w.Platform24 = w.Platform
-				}
-			}
+			// 存储现价成历史数据
+			w.saveHistory(storeKey)
+			// 获取24小时历史现价，供涨跌幅计算
+			w.save24History(storeKey)
 
 			//log.Println("[platform24] ", now.Format("2006-01-02 15:04:05"))
 		}
 		w.notify("[platform24] 协程结束", "")
 	}()
+}
+
+// 存储现价成历史数据
+func (w *Work) saveHistory(storeKey string) {
+	var now time.Time = time.Now()
+
+	//存储
+	var encodeBuffer bytes.Buffer
+	enc := gob.NewEncoder(&encodeBuffer)
+	err := enc.Encode(w.Platform)
+	if err != nil {
+		log.Println("[saveHistory] encode:", err)
+	} else {
+		w.Redis.Zadd(storeKey, []byte(encodeBuffer.String()), float64(now.Unix()))
+		//w.Redis.Expire(storeKey, int64(87000))
+	}
+}
+
+// 获取24小时历史现价，供涨跌幅计算
+func (w *Work) save24History(storeKey string) {
+	var now time.Time = time.Now()
+
+	data1, err := w.Redis.Zrevrangebyscore(storeKey, float64(now.Unix()-86400), float64(now.Unix()-87000), 0, 1)
+	if err == nil && len(data1) == 2 {
+		dec := gob.NewDecoder(bytes.NewBuffer(data1[0]))
+		err = dec.Decode(&w.Platform24)
+		if err != nil {
+			log.Println("[save24History] decode data1:", err)
+		}
+		w.Redis.Zremrangebyscore(storeKey, float64(now.Unix()-87000), float64(now.Unix()-864000))
+	} else {
+		data2, err := w.Redis.Zrangebyscore(storeKey, float64(now.Unix()-86400), float64(now.Unix()), 0, 1)
+		if err == nil && len(data2) == 2 {
+			dec := gob.NewDecoder(bytes.NewBuffer(data2[0]))
+			err = dec.Decode(&w.Platform24)
+			if err != nil {
+				log.Println("[save24History] decode data2:", err)
+			}
+		} else {
+			w.Platform24 = w.Platform
+		}
+	}
 }
 
 // 计数器用来计数通知和任务休息
@@ -608,11 +630,13 @@ func (w *Work) runWorkerHuobi() {
 						}
 						price := value.Get("close").Float()
 
-						var pencent float64
-						var upPrice float64
+						var pencent float64 = 0
+						var upPrice float64 = 0
 						var upTime string
 						if prevPrice, prevExist := w.Platform24["huobi"][coin+"-"+market]; prevExist {
-							pencent = (price - prevPrice.Price) / prevPrice.Price
+							if prevPrice.Price != 0 {
+								pencent = (price - prevPrice.Price) / prevPrice.Price
+							}
 							upPrice = prevPrice.Price
 							upTime = prevPrice.Time
 							w.Redis.Zadd("currentRank", []byte(coin+"|"+market+"|huobi"), pencent)
@@ -635,7 +659,7 @@ func (w *Work) runWorkerHuobi() {
 					//wesocket错误计数归零
 					i = 0
 					//保存现价数据为文件
-					w.save(string(retrunJson("ok", true, w.Platform["huobi"])), "huobi")
+					w.save(string(retrunJson("[huobi] ok", true, w.Platform["okex"])), "huobi")
 				} else {
 					log.Println("[huobi] data nil")
 					w.incrNotify("huobi")
@@ -699,11 +723,13 @@ func (w *Work) runWorkerOkex() {
 			now := time.Now().Format("20060102150405")
 			price := value.Get("close").Float()
 
-			var pencent float64
-			var upPrice float64
+			var pencent float64 = 0
+			var upPrice float64 = 0
 			var upTime string
 			if prevPrice, prevExist := w.Platform24["okex"][coin+"-"+market]; prevExist {
-				pencent = (price - prevPrice.Price) / prevPrice.Price
+				if prevPrice.Price != 0 {
+					pencent = (price - prevPrice.Price) / prevPrice.Price
+				}
 				upPrice = prevPrice.Price
 				upTime = prevPrice.Time
 				w.Redis.Zadd("currentRank", []byte(coin+"|"+market+"|okex"), pencent)
@@ -781,11 +807,13 @@ func (w *Work) runWorkerBinance() {
 			}
 			price := value.Get("price").Float()
 
-			var pencent float64
-			var upPrice float64
+			var pencent float64 = 0
+			var upPrice float64 = 0
 			var upTime string
 			if prevPrice, prevExist := w.Platform24["binance"][coin+"-"+market]; prevExist {
-				pencent = (price - prevPrice.Price) / prevPrice.Price
+				if prevPrice.Price != 0 {
+					pencent = (price - prevPrice.Price) / prevPrice.Price
+				}
 				upPrice = prevPrice.Price
 				upTime = prevPrice.Time
 				w.Redis.Zadd("currentRank", []byte(coin+"|"+market+"|binance"), pencent)
@@ -865,11 +893,13 @@ func (w *Work) runWorkerGate() {
 			now := time.Now().Format("20060102150405")
 			price := value.Get("last").Float()
 
-			var pencent float64
-			var upPrice float64
+			var pencent float64 = 0
+			var upPrice float64 = 0
 			var upTime string
 			if prevPrice, prevExist := w.Platform24["gate"][coin+"-"+market]; prevExist {
-				pencent = (price - prevPrice.Price) / prevPrice.Price
+				if prevPrice.Price != 0 {
+					pencent = (price - prevPrice.Price) / prevPrice.Price
+				}
 				upPrice = prevPrice.Price
 				upTime = prevPrice.Time
 				w.Redis.Zadd("currentRank", []byte(coin+"|"+market+"|gate"), pencent)
@@ -949,11 +979,13 @@ func (w *Work) runWorkerZb() {
 			now := time.Now().Format("20060102150405")
 			price := value.Get("lastPrice").Float()
 
-			var pencent float64
-			var upPrice float64
+			var pencent float64 = 0
+			var upPrice float64 = 0
 			var upTime string
 			if prevPrice, prevExist := w.Platform24["zb"][coin+"-"+market]; prevExist {
-				pencent = (price - prevPrice.Price) / prevPrice.Price
+				if prevPrice.Price != 0 {
+					pencent = (price - prevPrice.Price) / prevPrice.Price
+				}
 				upPrice = prevPrice.Price
 				upTime = prevPrice.Time
 				w.Redis.Zadd("currentRank", []byte(coin+"|"+market+"|zb"), pencent)
