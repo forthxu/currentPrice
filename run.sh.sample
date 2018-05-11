@@ -13,9 +13,8 @@ elif [ "$(expr substr $(uname -s) 1 5)" == "Linux" ];then
 elif [ "$(expr substr $(uname -s) 1 10)" == "MINGW32_NT" ];then
 	SP="\\"
 fi
-echo $WORKDIR
 
-# Server酱(http://sc.ftqq.com/3.version) token
+# Server酱通知(http://sc.ftqq.com/3.version) token
 TOKEN=""
 
 # 操作对象
@@ -24,14 +23,48 @@ if [ -n "$1" ];then
 	op=$1
 fi
 
-# 进程数
+# 消息通知函数
+notify()
+{
+	curl -o /dev/null -s "https://sc.ftqq.com/${TOKEN}.send?text=$1&desc=$2";
+}
+log()
+{
+	echo `date +%Y-%m-%d`" $1"
+}
+
+# pika
+pikaCount()
+{
+	echo `ps  aux | grep 'pika' | grep -v 'grep' | wc -l`;
+}
+pikaStart()
+{
+	cd $WORKDIR && pika -c ./pika.conf;
+}
+
+# redis
+redisCount()
+{
+	echo `ps  aux | grep 'redis' | grep -v 'grep' | wc -l`;
+}
+redisStart()
+{
+	cd $WORKDIR && redis-server ./redis.conf;
+}
+
+# currentPrice
 count()
 {
 	echo `ps  aux | grep 'currentPrice' | grep 'config.ini' | grep -v 'grep' | wc -l`;
 }
+
 # 运行程序
 run()
 {
+	#切换到运行目录
+	cd $WORKDIR
+
 	#设置日志存储
 	if [ ! -d "${WORKDIR}${SP}log" ]; then
 		mkdir "${WORKDIR}${SP}log"
@@ -47,8 +80,9 @@ run()
 
 	nohup $@ >> ${LOG_NAME} 2>&1 &
 
-	echo "运行程序："$@
-	echo "pid:$!  log:${LOG_NAME} "
+	log "运行程序："$@
+	log "pid: $!  log: ${LOG_NAME} "
+	log "currentPrice进程数：`count`"
 	return $!
 }
 # 开始函数
@@ -68,62 +102,72 @@ stop()
 {
 	local num=`count`
 	while [ $num -gt 0 ]; do
-		echo "当前进程数："$num
+		log "当前进程数："$num
 	    ps  aux | grep 'currentPrice' | grep -v 'grep' | awk '{print $2}' | xargs -I {} kill -9 {}
 	    num=`count`
 	done
-	echo "当前进程数："$num
+	log "当前进程数："$num
 
 	return $!
 }
-# 消息通知函数
-notify()
+
+careCurrentPrice()
 {
-	curl -o /dev/null -s "https://sc.ftqq.com/${TOKEN}.send?text=$1";
+	local num=`count`
+	if [ $num -lt 1 ];then
+		start
+		num=`count`
+		notify "现价接口挂掉重启~" "currentPrice进程数：$num"
+	fi;
 }
 
-# pika
-pikaCount()
+carePika()
 {
-	echo `ps  aux | grep 'pika' | grep -v 'grep' | wc -l`;
+	local num=`pikaCount`
+	if [ $num -lt 1 ];then
+		pikaStart
+		num=`pikaCount`
+		notify "pika挂掉重启~" "pika进程数：$num"
+		log "pika restart,currentPrice进程数：$num" 
+	fi;
 }
-pikaStart()
+
+careRedis()
 {
-	cd $WORKDIR && /home/huwei/output/bin/pika -c /home/huwei/output/conf/pika.conf;
+	local num=`redisCount`
+	if [ $num -lt 1 ];then
+		redisStart
+		num=`redisCount`
+		notify "redis挂掉重启~" "redis进程数：$num"
+		log "redis restart,currentPrice进程数：$num" 
+	fi;
 }
 
 # 操作
 case $op in 
 	care) 
-		num=`count`
-		if [ $num -lt 1 ];then
-			start
-			notify "现价接口挂掉重启~"
-			echo "care finish" 
-		fi;
-		numPika=`pikaCount`
-		if [ $numPika -lt 1 ];then
-			pikaStart
-			notify "pika挂掉重启~"
-			echo "care finish" 
-		fi;
+		#carePika
+		careRedis
+		careCurrentPrice
 	;;
 	start | begin) 
 		start
-		echo "start finish" 
+		log "start finish" 
 	;; 
 	stop | end) 
 		stop
-		echo "stop finish" 
+		log "stop finish" 
 	;;
 	restart | reload) 
 		stop
 		start
-		echo "restart finish" 
+		log "restart finish" 
 	;; 
 	status) 
-		echo "currentPrice进程数：" `count`
-		echo "pika进程数：" `pikaCount`
+		#log "pika进程数：`pikaCount`" 
+		log "redis进程数：`redisCount`" 
+		log "currentPrice进程数：`count`" 
+		
 	;;
 	*) 
 		echo $0" [start|stop|restart|status|care]" 

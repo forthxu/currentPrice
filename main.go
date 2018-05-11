@@ -44,6 +44,7 @@ var (
 	proxy      string
 	outDir     string
 	configFile string
+	info       string
 )
 
 func main() {
@@ -61,6 +62,7 @@ func main() {
 	flag.StringVar(&proxy, "x", "", "")
 	flag.StringVar(&outDir, "o", "", "")
 	flag.StringVar(&configFile, "f", "", "")
+	flag.StringVar(&info, "i", "ok", "")
 	flag.Parse()
 	//解析配置文件参数
 	var redisConfig map[string]string = make(map[string]string)
@@ -103,6 +105,9 @@ func main() {
 			if data, err := cfg.String("app", "outdir"); err == nil {
 				outDir = data
 			}
+			if data, err := cfg.String("app", "info"); err == nil {
+				info = data
+			}
 		}
 	}
 
@@ -116,6 +121,7 @@ func main() {
 		Proxy:       proxy,
 		OutDir:      outDir,
 		RedisConfig: redisConfig,
+		Info:        info,
 	}
 	w.Platform = make(map[string]map[string]currentPrice)
 	w.Platform24 = make(map[string]map[string]currentPrice)
@@ -126,6 +132,7 @@ func main() {
 	log.Println("[app] savegap time:", w.SaveGap, "second")
 	log.Println("[app] proxy:", w.Proxy)
 	log.Println("[app] outDir:", w.OutDir)
+	log.Println("[app] info:", w.Info)
 	w.initRedis()
 	w.runWorkers()
 	w.RunHttp()
@@ -179,6 +186,7 @@ type Work struct {
 	OutDir      string
 	RedisConfig map[string]string
 	Redis       goredis.Client
+	Info        string
 }
 
 //数据格式
@@ -195,6 +203,8 @@ type currentPrice struct {
 
 //http线程
 func (w *Work) RunHttp() {
+	// info
+	http.HandleFunc("/api/debug/", w.Debug)
 	// 涨跌幅排行榜
 	http.HandleFunc("/api/currentPrices/", w.CurrentPrices)
 	// 现价
@@ -207,6 +217,11 @@ func (w *Work) RunHttp() {
 		return
 	}
 	log.Println("[http] start ", w.Host, w.Port)
+}
+
+//http线程信息接口函数
+func (w *Work) Debug(resp http.ResponseWriter, req *http.Request) {
+	resp.Write(retrunJson(w.Info, true, nil))
 }
 
 //http线程涨跌幅排行榜接口函数
