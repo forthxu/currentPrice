@@ -1,13 +1,13 @@
 [redis]
-host: 127.0.0.1
-port: 6379
-db: 0
+host:127.0.0.1
+port:6379
+db:0
 auth:
 [app]
-host: 127.0.0.1
-port: 9999
+host:127.0.0.1
+port:9999
 token:
-gap:1
+gap:1000
 savegap:30
 proxy:
 outdir: 

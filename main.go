@@ -29,8 +29,8 @@ Options are:
     -h host     host for listen
     -p port     port for listen
     -t token    notify token for Server酱[http://sc.ftqq.com/3.version]
-    -g gap      time gap for get data and save file
-    -s saveGap  time gap for save history data with redis
+    -g gap      time gap Millisecond for get data and save file
+    -s saveGap  time gap second for save history data with redis
     -x proxy    default no use proxy
     -o outDir   dir to save origin data
     -f configFile     General configuration file
@@ -128,8 +128,8 @@ func main() {
 	w.NotifyCount = make(map[string]int)
 
 	log.Println("[app] listen:", w.Host, w.Port)
-	log.Println("[app] gap time:", w.Gap, "second")
-	log.Println("[app] savegap time:", w.SaveGap, "second")
+	log.Println("[app] gap time:", w.Gap, "Millisecond")
+	log.Println("[app] savegap time:", w.SaveGap, "Second")
 	log.Println("[app] proxy:", w.Proxy)
 	log.Println("[app] outDir:", w.OutDir)
 	log.Println("[app] info:", w.Info)
@@ -375,8 +375,9 @@ func (w *Work) runWorkers() {
 	go func() {
 		w.Platform["okex"] = make(map[string]currentPrice)
 		w.setNotify("okex", 0)
-		ticker := time.NewTicker(time.Duration(w.Gap) * time.Second)
-		for range ticker.C {
+		//ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond)
+		//for range ticker.C {
+		for {
 			w.runWorkerOkex()
 			// 超过10次错误后休息两分钟
 			if w.getNotify("okex") > 10 {
@@ -393,8 +394,9 @@ func (w *Work) runWorkers() {
 	go func() {
 		w.Platform["binance"] = make(map[string]currentPrice)
 		w.setNotify("binance", 0)
-		ticker := time.NewTicker(time.Duration(w.Gap) * time.Second)
-		for range ticker.C {
+		//ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond)
+		//for range ticker.C {
+		for {
 			w.runWorkerBinance()
 			// 超过10次错误后休息两分钟
 			if w.getNotify("binance") > 10 {
@@ -411,8 +413,9 @@ func (w *Work) runWorkers() {
 	go func() {
 		w.Platform["gate"] = make(map[string]currentPrice)
 		w.setNotify("gate", 0)
-		ticker := time.NewTicker(time.Duration(w.Gap) * time.Second)
-		for range ticker.C {
+		//ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond)
+		//for range ticker.C {
+		for {
 			w.runWorkerGate()
 			// 超过10次错误后休息两分钟
 			if w.getNotify("gate") > 10 {
@@ -429,8 +432,9 @@ func (w *Work) runWorkers() {
 	go func() {
 		w.Platform["zb"] = make(map[string]currentPrice)
 		w.setNotify("zb", 0)
-		ticker := time.NewTicker(time.Duration(w.Gap) * time.Second)
+		ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond)
 		for range ticker.C {
+			//for {
 			w.runWorkerZb()
 			// 超过10次错误后休息两分钟
 			if w.getNotify("zb") > 10 {
@@ -689,6 +693,16 @@ func (w *Work) runWorkerHuobi() {
 // okex现价
 func (w *Work) runWorkerOkex() {
 	// 现价接口
+	/*
+		urli := url.URL{}
+		urlproxy, _ := urli.Parse("https://127.0.0.1:1088")
+		client := &http.Client{
+			Transport: &http.Transport{
+				Proxy: http.ProxyURL(urlproxy),
+			},
+		}
+	*/
+
 	client := &http.Client{
 		Timeout: time.Duration(8) * time.Second,
 	}
@@ -700,6 +714,7 @@ func (w *Work) runWorkerOkex() {
 	} else {
 		req, err = http.NewRequest("GET", "http://"+w.Proxy+"/okex/v2/markets/tickers", nil)
 	}
+	//req.Header.Add("auth", "good")
 
 	if err != nil {
 		log.Println("[okex] ", err.Error())
@@ -1031,7 +1046,7 @@ func (w *Work) runWorkerZb() {
 //信息通知函数
 func (w *Work) notify(text string, desp string) error {
 	if len(w.Token) > 0 {
-		url := fmt.Sprintf("https://sc.ftqq.com/%s.send?text=%s&desp=%s", url.QueryEscape(token), url.QueryEscape(text), url.QueryEscape(desp))
+		url := fmt.Sprintf("https://sc.ftqq.com/%s.send?text=%s&desp=%s", url.QueryEscape(w.Token), url.QueryEscape(text), url.QueryEscape(desp))
 		resp, err := http.Get(url)
 		defer resp.Body.Close()
 		return err
