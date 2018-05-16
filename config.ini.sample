@@ -11,3 +11,4 @@ gap:1000
 savegap:30
 proxy:
 outdir: 
+info:form local

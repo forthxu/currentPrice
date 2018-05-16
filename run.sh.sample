@@ -16,6 +16,8 @@ fi
 
 # Server酱通知(http://sc.ftqq.com/3.version) token
 TOKEN=""
+BIN="currentPrice.bin"
+CONFIG="config.ini"
 
 # 操作对象
 op='none'
@@ -26,7 +28,7 @@ fi
 # 消息通知函数
 notify()
 {
-	curl -o /dev/null -s "https://sc.ftqq.com/${TOKEN}.send?text=$1&desc=$2";
+	curl -o /dev/null -s "https://sc.ftqq.com/${TOKEN}.send?text=${BIN}${1}&desc=${2}";
 }
 log()
 {
@@ -46,7 +48,7 @@ pikaStart()
 # redis
 redisCount()
 {
-	echo `ps  aux | grep 'redis' | grep -v 'grep' | wc -l`;
+	echo `ps  aux | grep 'redis-server' | grep -v 'grep' | wc -l`;
 }
 redisStart()
 {
@@ -56,7 +58,7 @@ redisStart()
 # currentPrice
 count()
 {
-	echo `ps  aux | grep 'currentPrice' | grep 'config.ini' | grep -v 'grep' | wc -l`;
+	echo `ps  aux | grep $BIN | grep $CONFIG | grep -v 'grep' | wc -l`;
 }
 
 # 运行程序
@@ -71,8 +73,8 @@ run()
 	fi
 	local DATA_DAY=`date +%Y-%m-%d`
 	local DATA_SECOND=`date +%Y-%m-%d-%H-%M-%S`
-	local LOG_NAME="${WORKDIR}${SP}log${SP}${DATA_DAY}.log"
-	local BACKUP_LOG_NAME="${WORKDIR}${SP}log${SP}${DATA_SECOND}_bak.log"
+	local LOG_NAME="${WORKDIR}${SP}log${SP}${BIN}-${DATA_DAY}.log"
+	local BACKUP_LOG_NAME="${WORKDIR}${SP}log${SP}${BIN}-${DATA_SECOND}_bak.log"
 	#备份日志
 	if [ -a "${LOG_NAME}" ]; then
 		mv ${LOG_NAME} ${BACKUP_LOG_NAME}
@@ -81,20 +83,14 @@ run()
 	nohup $@ >> ${LOG_NAME} 2>&1 &
 
 	log "运行程序："$@
-	log "pid: $!  log: ${LOG_NAME} "
-	log "currentPrice进程数：`count`"
+	log "bin: $BIN pid: $!  log: ${LOG_NAME} "
+	log "${BIN} 进程数：`count`"
 	return $!
 }
 # 开始函数
 start()
 {
-	if [ "$(uname)" == "Darwin" ];then
-		run ./currentPrice.app -f config.ini
-	elif [ "$(expr substr $(uname -s) 1 5)" == "Linux" ];then
-		run ./currentPrice.bin -f config.ini
-	elif [ "$(expr substr $(uname -s) 1 10)" == "MINGW32_NT" ];then
-		run ./currentPrice.exe -f config.ini
-	fi
+	run ./${BIN} -f ${CONFIG}
 	return $!
 }
 # 结束函数
@@ -103,7 +99,7 @@ stop()
 	local num=`count`
 	while [ $num -gt 0 ]; do
 		log "当前进程数："$num
-	    ps  aux | grep 'currentPrice' | grep -v 'grep' | awk '{print $2}' | xargs -I {} kill -9 {}
+	    ps  aux | grep $BIN | grep $CONFIG | grep -v 'grep' | awk '{print $2}' | xargs -I {} kill -9 {}
 	    num=`count`
 	done
 	log "当前进程数："$num
@@ -117,7 +113,7 @@ careCurrentPrice()
 	if [ $num -lt 1 ];then
 		start
 		num=`count`
-		notify "现价接口挂掉重启~" "currentPrice进程数：$num"
+		notify "现价接口挂掉重启~" "${BIN}进程数：$num"
 	fi;
 }
 
@@ -128,7 +124,7 @@ carePika()
 		pikaStart
 		num=`pikaCount`
 		notify "pika挂掉重启~" "pika进程数：$num"
-		log "pika restart,currentPrice进程数：$num" 
+		log "pika restart,${BIN}进程数：$num" 
 	fi;
 }
 
@@ -139,7 +135,7 @@ careRedis()
 		redisStart
 		num=`redisCount`
 		notify "redis挂掉重启~" "redis进程数：$num"
-		log "redis restart,currentPrice进程数：$num" 
+		log "redis restart,${BIN}进程数：$num" 
 	fi;
 }
 
@@ -166,10 +162,10 @@ case $op in
 	status) 
 		#log "pika进程数：`pikaCount`" 
 		log "redis进程数：`redisCount`" 
-		log "currentPrice进程数：`count`" 
+		log "${BIN}进程数：`count`" 
 		
 	;;
 	*) 
 		echo $0" [start|stop|restart|status|care]" 
 	;; 
-esac 
+esac

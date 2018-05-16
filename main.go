@@ -21,6 +21,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -123,9 +124,9 @@ func main() {
 		RedisConfig: redisConfig,
 		Info:        info,
 	}
-	w.Platform = make(map[string]map[string]currentPrice)
+	w.Platform = make(map[string]*currentPrices)
 	w.Platform24 = make(map[string]map[string]currentPrice)
-	w.NotifyCount = make(map[string]int)
+	w.NotifyCount.Num = make(map[string]int)
 
 	log.Println("[app] listen:", w.Host, w.Port)
 	log.Println("[app] gap time:", w.Gap, "Millisecond")
@@ -172,14 +173,19 @@ type Result struct {
 	Data   interface{} `json:"data"`
 }
 
+type Count struct {
+	sync.Mutex
+	Num map[string]int
+}
+
 //工作线程结构
 type Work struct {
 	Host        string
 	Port        int
 	Token       string
-	Platform    map[string]map[string]currentPrice
+	Platform    map[string]*currentPrices
 	Platform24  map[string]map[string]currentPrice
-	NotifyCount map[string]int
+	NotifyCount Count
 	Gap         int
 	SaveGap     int
 	Proxy       string
@@ -187,6 +193,11 @@ type Work struct {
 	RedisConfig map[string]string
 	Redis       goredis.Client
 	Info        string
+}
+
+type currentPrices struct {
+	sync.Mutex
+	Data map[string]currentPrice
 }
 
 //数据格式
@@ -279,7 +290,7 @@ func (w *Work) CurrentRank(resp http.ResponseWriter, req *http.Request) {
 		if !siteExist {
 			resultData[site] = make(map[string]currentPrice)
 		}
-		currentPrice, symbolExist := data[symbol]
+		currentPrice, symbolExist := data.Data[symbol]
 		if symbolExist {
 			resultData[site][symbol] = currentPrice
 		} else {
@@ -314,10 +325,12 @@ func (w *Work) CurrentPrices(resp http.ResponseWriter, req *http.Request) {
 			if !siteExist {
 				resultData[site] = make(map[string]currentPrice)
 			}
-			currentPrice, symbolExist := data[symbol]
+			data.Lock()
+			currentPrice, symbolExist := data.Data[symbol]
 			if symbolExist {
 				resultData[site][symbol] = currentPrice
 			}
+			data.Unlock()
 		}
 		resp.Write(retrunJson("ok", true, resultData))
 		return
@@ -333,16 +346,20 @@ func (w *Work) CurrentPrices(resp http.ResponseWriter, req *http.Request) {
 		if len(req.Form["market"]) > 0 && len(req.Form["market"][0]) > 0 { //同时指定了市场
 			market := strings.ToLower(req.Form["market"][0])
 			resultData[site] = make(map[string]currentPrice)
-			for k, v := range data {
+			data.Lock()
+			for k, v := range data.Data {
 				if v.Market == market {
 					resultData[site][k] = v
 				}
 			}
 			resp.Write(retrunJson("ok", true, resultData))
+			data.Unlock()
 			return
 		} else { //平台内所有市场对
-			resultData[site] = data
+			data.Lock()
+			resultData[site] = data.Data
 			resp.Write(retrunJson("ok", true, resultData))
+			data.Unlock()
 			return
 		}
 
@@ -356,7 +373,8 @@ func (w *Work) runWorkers() {
 
 	// huobi websocket 实时读取推送过来的数据
 	go func() {
-		w.Platform["huobi"] = make(map[string]currentPrice)
+		w.Platform["huobi"] = new(currentPrices)
+		w.Platform["huobi"].Data = make(map[string]currentPrice)
 		w.setNotify("huobi", 0)
 		for {
 			w.runWorkerHuobi()
@@ -373,11 +391,12 @@ func (w *Work) runWorkers() {
 
 	// okex http
 	go func() {
-		w.Platform["okex"] = make(map[string]currentPrice)
+		w.Platform["okex"] = new(currentPrices)
+		w.Platform["okex"].Data = make(map[string]currentPrice)
 		w.setNotify("okex", 0)
-		//ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond)
-		//for range ticker.C {
-		for {
+		ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond)
+		for range ticker.C {
+			//for {
 			w.runWorkerOkex()
 			// 超过10次错误后休息两分钟
 			if w.getNotify("okex") > 10 {
@@ -392,11 +411,12 @@ func (w *Work) runWorkers() {
 
 	// binance http
 	go func() {
-		w.Platform["binance"] = make(map[string]currentPrice)
+		w.Platform["binance"] = new(currentPrices)
+		w.Platform["binance"].Data = make(map[string]currentPrice)
 		w.setNotify("binance", 0)
-		//ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond)
-		//for range ticker.C {
-		for {
+		ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond)
+		for range ticker.C {
+			//for {
 			w.runWorkerBinance()
 			// 超过10次错误后休息两分钟
 			if w.getNotify("binance") > 10 {
@@ -411,11 +431,12 @@ func (w *Work) runWorkers() {
 
 	// gate http
 	go func() {
-		w.Platform["gate"] = make(map[string]currentPrice)
+		w.Platform["gate"] = new(currentPrices)
+		w.Platform["gate"].Data = make(map[string]currentPrice)
 		w.setNotify("gate", 0)
-		//ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond)
-		//for range ticker.C {
-		for {
+		ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond)
+		for range ticker.C {
+			//for {
 			w.runWorkerGate()
 			// 超过10次错误后休息两分钟
 			if w.getNotify("gate") > 10 {
@@ -430,9 +451,10 @@ func (w *Work) runWorkers() {
 
 	// zb http
 	go func() {
-		w.Platform["zb"] = make(map[string]currentPrice)
+		w.Platform["zb"] = new(currentPrices)
+		w.Platform["zb"].Data = make(map[string]currentPrice)
 		w.setNotify("zb", 0)
-		ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond)
+		ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond * 2)
 		for range ticker.C {
 			//for {
 			w.runWorkerZb()
@@ -449,12 +471,6 @@ func (w *Work) runWorkers() {
 
 	// 存储历史现价
 	go func() {
-		w.Platform24["huobi"] = make(map[string]currentPrice)
-		w.Platform24["okex"] = make(map[string]currentPrice)
-		w.Platform24["binance"] = make(map[string]currentPrice)
-		w.Platform24["gate"] = make(map[string]currentPrice)
-		w.Platform24["zb"] = make(map[string]currentPrice)
-
 		var storeKey string = "currentZset"
 		// 获取24小时历史现价，供涨跌幅计算
 		w.save24History(storeKey)
@@ -477,10 +493,17 @@ func (w *Work) runWorkers() {
 func (w *Work) saveHistory(storeKey string) {
 	var now time.Time = time.Now()
 
+	var resultData map[string]map[string]currentPrice = make(map[string]map[string]currentPrice)
+	for k, v := range w.Platform {
+		v.Lock()
+		defer v.Unlock()
+		resultData[k] = v.Data
+	}
+
 	//存储
 	var encodeBuffer bytes.Buffer
 	enc := gob.NewEncoder(&encodeBuffer)
-	err := enc.Encode(w.Platform)
+	err := enc.Encode(resultData)
 	if err != nil {
 		log.Println("[saveHistory] encode:", err)
 	} else {
@@ -510,27 +533,48 @@ func (w *Work) save24History(storeKey string) {
 				log.Println("[save24History] decode data2:", err)
 			}
 		} else {
-			w.Platform24 = w.Platform
+			for k, v := range w.Platform {
+				v.Lock()
+				w.Platform24[k] = v.Data
+				v.Unlock()
+			}
 		}
 	}
 }
 
 // 计数器用来计数通知和任务休息
 func (w *Work) incrNotify(site string) {
-	_, siteExist := w.NotifyCount[site]
+	w.NotifyCount.Lock()
+	defer w.NotifyCount.Unlock()
+
+	_, siteExist := w.NotifyCount.Num[site]
 	if siteExist {
-		w.NotifyCount[site] = w.NotifyCount[site] + 1
+		w.NotifyCount.Num[site] = w.NotifyCount.Num[site] + 1
 		return
 	}
-	w.NotifyCount[site] = 0
+	w.NotifyCount.Num[site] = 1
+	return
 }
 func (w *Work) setNotify(site string, value int) {
-	w.NotifyCount[site] = value
+	w.NotifyCount.Lock()
+	defer w.NotifyCount.Unlock()
+
+	_, siteExist := w.NotifyCount.Num[site]
+	if siteExist {
+		w.NotifyCount.Num[site] = value
+		return
+	}
+
+	w.NotifyCount.Num[site] = value
+	return
 }
 func (w *Work) getNotify(site string) int {
-	_, siteExist := w.NotifyCount[site]
+	w.NotifyCount.Lock()
+	defer w.NotifyCount.Unlock()
+
+	_, siteExist := w.NotifyCount.Num[site]
 	if siteExist {
-		return w.NotifyCount[site]
+		return w.NotifyCount.Num[site]
 	}
 	return 0
 }
@@ -661,7 +705,8 @@ func (w *Work) runWorkerHuobi() {
 							w.Redis.Zadd("currentRank", []byte(coin+"|"+market+"|huobi"), pencent)
 						}
 
-						w.Platform["huobi"][coin+"-"+market] = currentPrice{
+						w.Platform["huobi"].Lock()
+						w.Platform["huobi"].Data[coin+"-"+market] = currentPrice{
 							symbol,
 							coin,
 							market,
@@ -671,6 +716,7 @@ func (w *Work) runWorkerHuobi() {
 							upTime,
 							pencent,
 						}
+						w.Platform["huobi"].Unlock()
 						return true // keep iterating
 					})
 					//错误计数归零
@@ -678,7 +724,11 @@ func (w *Work) runWorkerHuobi() {
 					//wesocket错误计数归零
 					i = 0
 					//保存现价数据为文件
-					w.save(string(retrunJson("[huobi] ok", true, w.Platform["okex"])), "huobi")
+					if len(w.OutDir) > 0 {
+						w.Platform["huobi"].Lock()
+						w.save(string(retrunJson("[huobi] ok", true, w.Platform["huobi"].Data)), "huobi")
+						w.Platform["huobi"].Unlock()
+					}
 				} else {
 					log.Println("[huobi] data nil")
 					w.incrNotify("huobi")
@@ -765,7 +815,8 @@ func (w *Work) runWorkerOkex() {
 				w.Redis.Zadd("currentRank", []byte(coin+"|"+market+"|okex"), pencent)
 			}
 
-			w.Platform["okex"][coin+"-"+market] = currentPrice{
+			w.Platform["okex"].Lock()
+			w.Platform["okex"].Data[coin+"-"+market] = currentPrice{
 				symbol,
 				coin,
 				market,
@@ -775,12 +826,15 @@ func (w *Work) runWorkerOkex() {
 				upTime,
 				pencent,
 			}
+			w.Platform["okex"].Unlock()
 			return true // keep iterating
 		})
 		//错误计数归零
 		w.setNotify("okex", 0)
 		//保存现价数据为文件
-		w.save(string(body), "okex")
+		if len(w.OutDir) > 0 {
+			w.save(string(body), "okex")
+		}
 	} else {
 		log.Println("[okex] data nil")
 		w.incrNotify("okex")
@@ -849,7 +903,8 @@ func (w *Work) runWorkerBinance() {
 				w.Redis.Zadd("currentRank", []byte(coin+"|"+market+"|binance"), pencent)
 			}
 
-			w.Platform["binance"][coin+"-"+market] = currentPrice{
+			w.Platform["binance"].Lock()
+			w.Platform["binance"].Data[coin+"-"+market] = currentPrice{
 				symbol,
 				coin,
 				market,
@@ -859,12 +914,15 @@ func (w *Work) runWorkerBinance() {
 				upTime,
 				pencent,
 			}
+			w.Platform["binance"].Unlock()
 			return true // keep iterating
 		})
 		//错误计数归零
 		w.setNotify("binance", 0)
 		//保存现价数据为文件
-		w.save(string(body), "binance")
+		if len(w.OutDir) > 0 {
+			w.save(string(body), "binance")
+		}
 	} else {
 		log.Println("[binance] data nil")
 		w.incrNotify("binance")
@@ -935,7 +993,8 @@ func (w *Work) runWorkerGate() {
 				w.Redis.Zadd("currentRank", []byte(coin+"|"+market+"|gate"), pencent)
 			}
 
-			w.Platform["gate"][coin+"-"+market] = currentPrice{
+			w.Platform["gate"].Lock()
+			w.Platform["gate"].Data[coin+"-"+market] = currentPrice{
 				symbol,
 				coin,
 				market,
@@ -945,12 +1004,15 @@ func (w *Work) runWorkerGate() {
 				upTime,
 				pencent,
 			}
+			w.Platform["gate"].Unlock()
 			return true // keep iterating
 		})
 		//错误计数归零
 		w.setNotify("gate", 0)
 		//保存现价数据为文件
-		w.save(string(body), "gate")
+		if len(w.OutDir) > 0 {
+			w.save(string(body), "gate")
+		}
 	} else {
 		log.Println("[gate] data nil")
 		w.incrNotify("gate")
@@ -1021,7 +1083,8 @@ func (w *Work) runWorkerZb() {
 				w.Redis.Zadd("currentRank", []byte(coin+"|"+market+"|zb"), pencent)
 			}
 
-			w.Platform["zb"][coin+"-"+market] = currentPrice{
+			w.Platform["zb"].Lock()
+			w.Platform["zb"].Data[coin+"-"+market] = currentPrice{
 				symbol,
 				coin,
 				market,
@@ -1031,12 +1094,15 @@ func (w *Work) runWorkerZb() {
 				upTime,
 				pencent,
 			}
+			w.Platform["zb"].Unlock()
 			return true // keep iterating
 		})
 		//错误计数归零
 		w.setNotify("zb", 0)
 		//保存现价数据为文件
-		w.save(strings.Trim(string(body), "()"), "zb")
+		if len(w.OutDir) > 0 {
+			w.save(strings.Trim(string(body), "()"), "zb")
+		}
 	} else {
 		log.Println("[zb] data nil")
 		w.incrNotify("zb")
