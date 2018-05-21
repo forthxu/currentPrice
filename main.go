@@ -15,6 +15,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -27,14 +28,15 @@ import (
 
 var usage = `Usage: %s [options] 
 Options are:
-    -h host     host for listen
-    -p port     port for listen
-    -t token    notify token for Server酱[http://sc.ftqq.com/3.version]
-    -g gap      time gap Millisecond for get data and save file
-    -s saveGap  time gap second for save history data with redis
-    -x proxy    default no use proxy
-    -o outDir   dir to save origin data
-    -f configFile     General configuration file
+    -h host       host for listen
+    -p port       port for listen
+    -t token      notify token for Server酱[http://sc.ftqq.com/3.version]
+    -g gap        time gap Millisecond for get data and save file
+    -s saveGap    time gap second for save history data with redis
+    -x proxy      default no use proxy
+    -o outDir     dir to save origin data
+    -f configFile General configuration file
+    -b bind ip   bind local out ip
 `
 var (
 	host       string
@@ -46,6 +48,7 @@ var (
 	outDir     string
 	configFile string
 	info       string
+	bind       string
 )
 
 func main() {
@@ -64,6 +67,7 @@ func main() {
 	flag.StringVar(&outDir, "o", "", "")
 	flag.StringVar(&configFile, "f", "", "")
 	flag.StringVar(&info, "i", "ok", "")
+	flag.StringVar(&bind, "b", "", "")
 	flag.Parse()
 	//解析配置文件参数
 	var redisConfig map[string]string = make(map[string]string)
@@ -109,6 +113,9 @@ func main() {
 			if data, err := cfg.String("app", "info"); err == nil {
 				info = data
 			}
+			if data, err := cfg.String("app", "bind"); err == nil {
+				bind = data
+			}
 		}
 	}
 
@@ -123,15 +130,17 @@ func main() {
 		OutDir:      outDir,
 		RedisConfig: redisConfig,
 		Info:        info,
+		Bind:        bind,
 	}
 	w.Platform = make(map[string]*currentPrices)
-	w.Platform24 = make(map[string]map[string]currentPrice)
+	w.Platform24 = make(map[string]*currentPrices)
 	w.NotifyCount.Num = make(map[string]int)
 
 	log.Println("[app] listen:", w.Host, w.Port)
 	log.Println("[app] gap time:", w.Gap, "Millisecond")
 	log.Println("[app] savegap time:", w.SaveGap, "Second")
 	log.Println("[app] proxy:", w.Proxy)
+	log.Println("[app] bind local ip:", w.Bind)
 	log.Println("[app] outDir:", w.OutDir)
 	log.Println("[app] info:", w.Info)
 	w.initRedis()
@@ -157,6 +166,83 @@ func (w *Work) initRedis() {
 	}
 }
 
+//绑定本地出口ip
+func (w *Work) bindIP() (*http.Transport, error) {
+	if len(w.Bind) < 0 {
+		return nil, errors.New(fmt.Sprintf("[%s] local bind ip not exist", w.Bind))
+	}
+
+	localAddr, err := net.ResolveIPAddr("ip", w.Bind)
+	if err != nil {
+		return nil, errors.New(fmt.Sprintf("[%s] local bind ip error:%s", w.Bind, err.Error()))
+	}
+	localTCPAddr := net.TCPAddr{
+		IP: localAddr.IP,
+	}
+	d := net.Dialer{
+		LocalAddr: &localTCPAddr,
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+
+	tr := &http.Transport{
+		Proxy:               http.ProxyFromEnvironment,
+		Dial:                d.Dial,
+		TLSHandshakeTimeout: 10 * time.Second,
+	}
+	return tr, nil
+}
+
+func (w *Work) getHttpClient() (*http.Client, error) {
+	/*
+		urli := url.URL{}
+		urlproxy, _ := urli.Parse("https://127.0.0.1:1088")
+		client := &http.Client{
+			Transport: &http.Transport{
+				Proxy: http.ProxyURL(urlproxy),
+			},
+		}
+	*/
+
+	client := &http.Client{
+	//Timeout: time.Duration(8) * time.Second,
+	}
+
+	if len(w.Bind) > 0 {
+		localAddr, err := net.ResolveIPAddr("ip", w.Bind)
+		if err != nil {
+			return nil, errors.New(fmt.Sprintf("bind local ip[%s] error:%s", w.Bind, err.Error()))
+		}
+		localTCPAddr := net.TCPAddr{
+			IP: localAddr.IP,
+		}
+		d := net.Dialer{
+			LocalAddr: &localTCPAddr,
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}
+
+		tr := &http.Transport{
+			Proxy:               http.ProxyFromEnvironment,
+			Dial:                d.Dial,
+			TLSHandshakeTimeout: 10 * time.Second,
+		}
+		client.Transport = tr
+	}
+
+	return client, nil
+}
+
+func (w *Work) getWebsocketClient() (*websocket.Dialer, error) {
+	var DefaultDialer = &websocket.Dialer{
+		Proxy: http.ProxyFromEnvironment,
+	}
+	if len(w.Bind) > 0 {
+		DefaultDialer.LocalAddr = w.Bind
+	}
+	return DefaultDialer, nil
+}
+
 //http线程返回结果结构函数
 func retrunJson(msg string, status bool, data interface{}) []byte {
 	b, err := json.Marshal(Result{status, msg, data})
@@ -180,11 +266,12 @@ type Count struct {
 
 //工作线程结构
 type Work struct {
+	sync.Mutex
 	Host        string
 	Port        int
 	Token       string
 	Platform    map[string]*currentPrices
-	Platform24  map[string]map[string]currentPrice
+	Platform24  map[string]*currentPrices
 	NotifyCount Count
 	Gap         int
 	SaveGap     int
@@ -193,6 +280,7 @@ type Work struct {
 	RedisConfig map[string]string
 	Redis       goredis.Client
 	Info        string
+	Bind        string
 }
 
 type currentPrices struct {
@@ -373,8 +461,12 @@ func (w *Work) runWorkers() {
 
 	// huobi websocket 实时读取推送过来的数据
 	go func() {
+		w.Lock()
 		w.Platform["huobi"] = new(currentPrices)
+		w.Unlock()
+		w.Platform["huobi"].Lock()
 		w.Platform["huobi"].Data = make(map[string]currentPrice)
+		w.Platform["huobi"].Unlock()
 		w.setNotify("huobi", 0)
 		for {
 			w.runWorkerHuobi()
@@ -391,8 +483,12 @@ func (w *Work) runWorkers() {
 
 	// okex http
 	go func() {
+		w.Lock()
 		w.Platform["okex"] = new(currentPrices)
+		w.Unlock()
+		w.Platform["okex"].Lock()
 		w.Platform["okex"].Data = make(map[string]currentPrice)
+		w.Platform["okex"].Unlock()
 		w.setNotify("okex", 0)
 		ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond)
 		for range ticker.C {
@@ -411,8 +507,12 @@ func (w *Work) runWorkers() {
 
 	// binance http
 	go func() {
+		w.Lock()
 		w.Platform["binance"] = new(currentPrices)
+		w.Unlock()
+		w.Platform["binance"].Lock()
 		w.Platform["binance"].Data = make(map[string]currentPrice)
+		w.Platform["binance"].Unlock()
 		w.setNotify("binance", 0)
 		ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond)
 		for range ticker.C {
@@ -431,8 +531,12 @@ func (w *Work) runWorkers() {
 
 	// gate http
 	go func() {
+		w.Lock()
 		w.Platform["gate"] = new(currentPrices)
+		w.Unlock()
+		w.Platform["gate"].Lock()
 		w.Platform["gate"].Data = make(map[string]currentPrice)
+		w.Platform["gate"].Unlock()
 		w.setNotify("gate", 0)
 		ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond)
 		for range ticker.C {
@@ -451,8 +555,12 @@ func (w *Work) runWorkers() {
 
 	// zb http
 	go func() {
+		w.Lock()
 		w.Platform["zb"] = new(currentPrices)
+		w.Unlock()
+		w.Platform["zb"].Lock()
 		w.Platform["zb"].Data = make(map[string]currentPrice)
+		w.Platform["zb"].Unlock()
 		w.setNotify("zb", 0)
 		ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond * 2)
 		for range ticker.C {
@@ -518,24 +626,51 @@ func (w *Work) save24History(storeKey string) {
 
 	data1, err := w.Redis.Zrevrangebyscore(storeKey, float64(now.Unix()-86400), float64(now.Unix()-87000), 0, 1)
 	if err == nil && len(data1) == 2 {
+		var platformData map[string]map[string]currentPrice = make(map[string]map[string]currentPrice)
+
 		dec := gob.NewDecoder(bytes.NewBuffer(data1[0]))
-		err = dec.Decode(&w.Platform24)
+		err = dec.Decode(&platformData)
 		if err != nil {
 			log.Println("[save24History] decode data1:", err)
+			return
 		}
+		for k, v := range platformData {
+			if _, platformExist := w.Platform24[k]; !platformExist {
+				w.Platform24[k] = new(currentPrices)
+			}
+			w.Platform24[k].Lock()
+			w.Platform24[k].Data = v
+			w.Platform24[k].Unlock()
+		}
+		//删除过期的数据
 		w.Redis.Zremrangebyscore(storeKey, float64(now.Unix()-87000), float64(now.Unix()-864000))
 	} else {
 		data2, err := w.Redis.Zrangebyscore(storeKey, float64(now.Unix()-86400), float64(now.Unix()), 0, 1)
 		if err == nil && len(data2) == 2 {
+			var platformData map[string]map[string]currentPrice = make(map[string]map[string]currentPrice)
+
 			dec := gob.NewDecoder(bytes.NewBuffer(data2[0]))
-			err = dec.Decode(&w.Platform24)
+			err = dec.Decode(&platformData)
 			if err != nil {
 				log.Println("[save24History] decode data2:", err)
+				return
+			}
+
+			for k, v := range platformData {
+				if _, platformExist := w.Platform24[k]; !platformExist {
+					w.Platform24[k] = new(currentPrices)
+				}
+				w.Platform24[k].Lock()
+				w.Platform24[k].Data = v
+				w.Platform24[k].Unlock()
 			}
 		} else {
 			for k, v := range w.Platform {
+				if _, platformExist := w.Platform24[k]; !platformExist {
+					w.Platform24[k] = new(currentPrices)
+				}
 				v.Lock()
-				w.Platform24[k] = v.Data
+				w.Platform24[k].Data = v.Data
 				v.Unlock()
 			}
 		}
@@ -622,7 +757,15 @@ func (w *Work) runWorkerHuobi() {
 		u = url.URL{Scheme: "ws", Host: w.Proxy, Path: "/huobi/ws"}
 	}
 
-	ws, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	DefaultDialer, err := w.getWebsocketClient()
+	if err != nil {
+		log.Println("[huobi] ", err.Error())
+		w.incrNotify("huobi")
+		return
+	}
+	ws, _, err := DefaultDialer.Dial(u.String(), nil)
+
+	//ws, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
 		log.Println("[huobi] ", err.Error())
 		w.incrNotify("huobi")
@@ -635,6 +778,7 @@ func (w *Work) runWorkerHuobi() {
 	if err != nil {
 		log.Println("[huobi] ", err)
 		w.incrNotify("huobi")
+		return
 	}
 	log.Println("[huobi] huobi websocket connected")
 
@@ -696,13 +840,17 @@ func (w *Work) runWorkerHuobi() {
 						var pencent float64 = 0
 						var upPrice float64 = 0
 						var upTime string
-						if prevPrice, prevExist := w.Platform24["huobi"][coin+"-"+market]; prevExist {
-							if prevPrice.Price != 0 {
-								pencent = (price - prevPrice.Price) / prevPrice.Price
+						if _, platformExist := w.Platform24["huobi"]; platformExist {
+							w.Platform24["huobi"].Lock()
+							if prevPrice, prevExist := w.Platform24["huobi"].Data[coin+"-"+market]; prevExist {
+								if prevPrice.Price != 0 {
+									pencent = (price - prevPrice.Price) / prevPrice.Price
+								}
+								upPrice = prevPrice.Price
+								upTime = prevPrice.Time
+								w.Redis.Zadd("currentRank", []byte(coin+"|"+market+"|huobi"), pencent)
 							}
-							upPrice = prevPrice.Price
-							upTime = prevPrice.Time
-							w.Redis.Zadd("currentRank", []byte(coin+"|"+market+"|huobi"), pencent)
+							w.Platform24["huobi"].Unlock()
 						}
 
 						w.Platform["huobi"].Lock()
@@ -743,22 +891,16 @@ func (w *Work) runWorkerHuobi() {
 // okex现价
 func (w *Work) runWorkerOkex() {
 	// 现价接口
-	/*
-		urli := url.URL{}
-		urlproxy, _ := urli.Parse("https://127.0.0.1:1088")
-		client := &http.Client{
-			Transport: &http.Transport{
-				Proxy: http.ProxyURL(urlproxy),
-			},
-		}
-	*/
+	var err error
 
-	client := &http.Client{
-		Timeout: time.Duration(8) * time.Second,
+	client, err := w.getHttpClient()
+	if err != nil {
+		log.Println("[okex] ", err.Error())
+		w.incrNotify("okex")
+		return
 	}
 
 	var req *http.Request
-	var err error
 	if len(w.Proxy) == 0 {
 		req, err = http.NewRequest("GET", "http://www.okex.com/v2/markets/tickers", nil)
 	} else {
@@ -806,13 +948,17 @@ func (w *Work) runWorkerOkex() {
 			var pencent float64 = 0
 			var upPrice float64 = 0
 			var upTime string
-			if prevPrice, prevExist := w.Platform24["okex"][coin+"-"+market]; prevExist {
-				if prevPrice.Price != 0 {
-					pencent = (price - prevPrice.Price) / prevPrice.Price
+			if _, platformExist := w.Platform24["okex"]; platformExist {
+				w.Platform24["okex"].Lock()
+				if prevPrice, prevExist := w.Platform24["okex"].Data[coin+"-"+market]; prevExist {
+					if prevPrice.Price != 0 {
+						pencent = (price - prevPrice.Price) / prevPrice.Price
+					}
+					upPrice = prevPrice.Price
+					upTime = prevPrice.Time
+					w.Redis.Zadd("currentRank", []byte(coin+"|"+market+"|okex"), pencent)
 				}
-				upPrice = prevPrice.Price
-				upTime = prevPrice.Time
-				w.Redis.Zadd("currentRank", []byte(coin+"|"+market+"|okex"), pencent)
+				w.Platform24["okex"].Unlock()
 			}
 
 			w.Platform["okex"].Lock()
@@ -844,12 +990,16 @@ func (w *Work) runWorkerOkex() {
 // binance现价
 func (w *Work) runWorkerBinance() {
 	// 现价接口
-	client := &http.Client{
-		Timeout: time.Duration(5) * time.Second,
+	var err error
+
+	client, err := w.getHttpClient()
+	if err != nil {
+		log.Println("[binance] ", err.Error())
+		w.incrNotify("binance")
+		return
 	}
 
 	var req *http.Request
-	var err error
 	if len(w.Proxy) == 0 {
 		req, err = http.NewRequest("GET", "http://www.binance.com/api/v3/ticker/price", nil)
 	} else {
@@ -894,13 +1044,17 @@ func (w *Work) runWorkerBinance() {
 			var pencent float64 = 0
 			var upPrice float64 = 0
 			var upTime string
-			if prevPrice, prevExist := w.Platform24["binance"][coin+"-"+market]; prevExist {
-				if prevPrice.Price != 0 {
-					pencent = (price - prevPrice.Price) / prevPrice.Price
+			if _, platformExist := w.Platform24["binance"]; platformExist {
+				w.Platform24["binance"].Lock()
+				if prevPrice, prevExist := w.Platform24["binance"].Data[coin+"-"+market]; prevExist {
+					if prevPrice.Price != 0 {
+						pencent = (price - prevPrice.Price) / prevPrice.Price
+					}
+					upPrice = prevPrice.Price
+					upTime = prevPrice.Time
+					w.Redis.Zadd("currentRank", []byte(coin+"|"+market+"|binance"), pencent)
 				}
-				upPrice = prevPrice.Price
-				upTime = prevPrice.Time
-				w.Redis.Zadd("currentRank", []byte(coin+"|"+market+"|binance"), pencent)
+				w.Platform24["binance"].Unlock()
 			}
 
 			w.Platform["binance"].Lock()
@@ -932,12 +1086,16 @@ func (w *Work) runWorkerBinance() {
 // okex现价
 func (w *Work) runWorkerGate() {
 	// 现价接口
-	client := &http.Client{
-		Timeout: time.Duration(5) * time.Second,
+	var err error
+
+	client, err := w.getHttpClient()
+	if err != nil {
+		log.Println("[gate] ", err.Error())
+		w.incrNotify("gate")
+		return
 	}
 
 	var req *http.Request
-	var err error
 	if len(w.Proxy) == 0 {
 		req, err = http.NewRequest("GET", "http://data.gate.io/api2/1/tickers", nil)
 	} else {
@@ -984,13 +1142,17 @@ func (w *Work) runWorkerGate() {
 			var pencent float64 = 0
 			var upPrice float64 = 0
 			var upTime string
-			if prevPrice, prevExist := w.Platform24["gate"][coin+"-"+market]; prevExist {
-				if prevPrice.Price != 0 {
-					pencent = (price - prevPrice.Price) / prevPrice.Price
+			if _, platformExist := w.Platform24["gate"]; platformExist {
+				w.Platform24["gate"].Lock()
+				if prevPrice, prevExist := w.Platform24["gate"].Data[coin+"-"+market]; prevExist {
+					if prevPrice.Price != 0 {
+						pencent = (price - prevPrice.Price) / prevPrice.Price
+					}
+					upPrice = prevPrice.Price
+					upTime = prevPrice.Time
+					w.Redis.Zadd("currentRank", []byte(coin+"|"+market+"|gate"), pencent)
 				}
-				upPrice = prevPrice.Price
-				upTime = prevPrice.Time
-				w.Redis.Zadd("currentRank", []byte(coin+"|"+market+"|gate"), pencent)
+				w.Platform24["gate"].Unlock()
 			}
 
 			w.Platform["gate"].Lock()
@@ -1022,12 +1184,16 @@ func (w *Work) runWorkerGate() {
 // zb现价
 func (w *Work) runWorkerZb() {
 	//现价接口
-	client := &http.Client{
-		Timeout: time.Duration(8) * time.Second,
+	var err error
+
+	client, err := w.getHttpClient()
+	if err != nil {
+		log.Println("[zb] ", err.Error())
+		w.incrNotify("zb")
+		return
 	}
 
 	var req *http.Request
-	var err error
 	if len(w.Proxy) == 0 {
 		req, err = http.NewRequest("GET", "https://trans.zb.com/line/topall", nil)
 	} else {
@@ -1074,13 +1240,17 @@ func (w *Work) runWorkerZb() {
 			var pencent float64 = 0
 			var upPrice float64 = 0
 			var upTime string
-			if prevPrice, prevExist := w.Platform24["zb"][coin+"-"+market]; prevExist {
-				if prevPrice.Price != 0 {
-					pencent = (price - prevPrice.Price) / prevPrice.Price
+			if _, platformExist := w.Platform24["zb"]; platformExist {
+				w.Platform24["zb"].Lock()
+				if prevPrice, prevExist := w.Platform24["zb"].Data[coin+"-"+market]; prevExist {
+					if prevPrice.Price != 0 {
+						pencent = (price - prevPrice.Price) / prevPrice.Price
+					}
+					upPrice = prevPrice.Price
+					upTime = prevPrice.Time
+					w.Redis.Zadd("currentRank", []byte(coin+"|"+market+"|zb"), pencent)
 				}
-				upPrice = prevPrice.Price
-				upTime = prevPrice.Time
-				w.Redis.Zadd("currentRank", []byte(coin+"|"+market+"|zb"), pencent)
+				w.Platform24["zb"].Unlock()
 			}
 
 			w.Platform["zb"].Lock()
@@ -1112,7 +1282,7 @@ func (w *Work) runWorkerZb() {
 //信息通知函数
 func (w *Work) notify(text string, desp string) error {
 	if len(w.Token) > 0 {
-		url := fmt.Sprintf("https://sc.ftqq.com/%s.send?text=%s&desp=%s", url.QueryEscape(w.Token), url.QueryEscape(text), url.QueryEscape(desp))
+		url := fmt.Sprintf("https://sc.ftqq.com/%s.send?text=%s&desp=%s", url.QueryEscape(w.Token), url.QueryEscape("["+w.Info+"]"+text), url.QueryEscape(desp))
 		resp, err := http.Get(url)
 		defer resp.Body.Close()
 		return err
