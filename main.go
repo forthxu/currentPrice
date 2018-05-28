@@ -902,9 +902,9 @@ func (w *Work) runWorkerOkex() {
 
 	var req *http.Request
 	if len(w.Proxy) == 0 {
-		req, err = http.NewRequest("GET", "http://www.okex.com/v2/markets/tickers", nil)
+		req, err = http.NewRequest("GET", "https://www.okex.com/v2/spot/markets/tickers", nil)
 	} else {
-		req, err = http.NewRequest("GET", "http://"+w.Proxy+"/okex/v2/markets/tickers", nil)
+		req, err = http.NewRequest("GET", "http://"+w.Proxy+"/okex/v2/spot/markets/tickers", nil)
 	}
 	//req.Header.Add("auth", "good")
 
@@ -1001,7 +1001,7 @@ func (w *Work) runWorkerBinance() {
 
 	var req *http.Request
 	if len(w.Proxy) == 0 {
-		req, err = http.NewRequest("GET", "http://www.binance.com/api/v3/ticker/price", nil)
+		req, err = http.NewRequest("GET", "https://www.binance.com/api/v3/ticker/price", nil)
 	} else {
 		req, err = http.NewRequest("GET", "http://"+w.Proxy+"/binance/api/v3/ticker/price", nil)
 	}
