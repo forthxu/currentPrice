@@ -9,7 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/forthxu/goredis"
-	"github.com/gorilla/websocket"
+	"github.com/forthxu/websocket"
 	"github.com/larspensjo/config"
 	"github.com/tidwall/gjson"
 	"io"
@@ -907,7 +907,6 @@ func (w *Work) runWorkerOkex() {
 		req, err = http.NewRequest("GET", "http://"+w.Proxy+"/okex/v2/spot/markets/tickers", nil)
 	}
 	//req.Header.Add("auth", "good")
-
 	if err != nil {
 		log.Println("[okex] ", err.Error())
 		w.incrNotify("okex")
