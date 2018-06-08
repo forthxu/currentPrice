@@ -481,6 +481,28 @@ func (w *Work) runWorkers() {
 		w.notify("[huobi] 协程结束", "")
 	}()
 
+	// hadax websocket
+	go func() {
+		w.Lock()
+		w.Platform["hadax"] = new(currentPrices)
+		w.Unlock()
+		w.Platform["hadax"].Lock()
+		w.Platform["hadax"].Data = make(map[string]currentPrice)
+		w.Platform["hadax"].Unlock()
+		w.setNotify("hadax", 0)
+		for {
+			w.runWorkerHadax()
+			// 超过5次错误后休息一分钟
+			if w.getNotify("hadax") > 5 {
+				w.notify("[hadax] currentPrice fail", "读取现价接口超过五次错误休息一分钟")
+				w.setNotify("hadax", 0)
+				time.Sleep(60 * time.Second)
+			}
+			//log.Println("[okex] hadax websocket reconnecting", w.getNotify("hadax"))
+		}
+		w.notify("[hadax] 协程结束", "")
+	}()
+
 	// okex http
 	go func() {
 		w.Lock()
@@ -643,7 +665,7 @@ func (w *Work) save24History(storeKey string) {
 			w.Platform24[k].Unlock()
 		}
 		//删除过期的数据
-		w.Redis.Zremrangebyscore(storeKey, float64(now.Unix()-87000), float64(now.Unix()-864000))
+		w.Redis.Zremrangebyscore(storeKey, float64(0), float64(now.Unix()-87000))
 	} else {
 		data2, err := w.Redis.Zrangebyscore(storeKey, float64(now.Unix()-86400), float64(now.Unix()), 0, 1)
 		if err == nil && len(data2) == 2 {
@@ -831,7 +853,10 @@ func (w *Work) runWorkerHuobi() {
 						coin := symbol[0 : len(symbol)-4]
 						market := symbol[len(symbol)-4 : len(symbol)]
 						now := time.Now().Format("20060102150405")
-						if market != "usdt" {
+						if symbol[len(symbol)-2:len(symbol)] == "ht" {
+							coin = symbol[0 : len(symbol)-2]
+							market = symbol[len(symbol)-2 : len(symbol)]
+						} else if market != "usdt" {
 							coin = symbol[0 : len(symbol)-3]
 							market = symbol[len(symbol)-3 : len(symbol)]
 						}
@@ -880,6 +905,150 @@ func (w *Work) runWorkerHuobi() {
 				} else {
 					log.Println("[huobi] data nil")
 					w.incrNotify("huobi")
+					i = i + 5
+				}
+			}
+		}
+
+	}
+}
+
+// hadax现价
+func (w *Work) runWorkerHadax() {
+	//连接websocket
+	var u url.URL
+	if len(w.Proxy) == 0 {
+		u = url.URL{Scheme: "wss", Host: "www.huobi.br.com", Path: "/-/s/hdx/ws"}
+	} else {
+		u = url.URL{Scheme: "ws", Host: w.Proxy, Path: "/hadax/ws"}
+	}
+
+	DefaultDialer, err := w.getWebsocketClient()
+	if err != nil {
+		log.Println("[hadax] ", err.Error())
+		w.incrNotify("hadax")
+		return
+	}
+	ws, _, err := DefaultDialer.Dial(u.String(), nil)
+
+	//ws, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	if err != nil {
+		log.Println("[hadax] ", err.Error())
+		w.incrNotify("hadax")
+		return
+	}
+	defer ws.Close()
+
+	//订阅现价数据
+	err = ws.WriteMessage(websocket.TextMessage, []byte("{\"sub\":\"market.overview\"}"))
+	if err != nil {
+		log.Println("[hadax] ", err)
+		w.incrNotify("hadax")
+		return
+	}
+	log.Println("[hadax] hadax websocket connected")
+
+	//数据
+	var i int = 0 //用于计算websocket出错次数
+	for {
+		//多次出错后重连
+		if i > 100 {
+			log.Println("[hadax] too many err:", i)
+			break
+		}
+
+		//阻塞读取数据
+		_, originMsg, err := ws.ReadMessage()
+		if err != nil {
+			log.Println("[hadax] ws read err:", err)
+			w.incrNotify("hadax")
+			i = i + 40
+			continue
+		}
+		//解压数据
+		msg, err := GzipDecode(originMsg)
+		if err != nil {
+			log.Println("[hadax] gzip decode err:", err)
+			w.incrNotify("hadax")
+			i = i + 10
+			continue
+		}
+
+		if strings.Contains(string(msg), "ping") { //心跳
+			if err := ws.WriteMessage(websocket.TextMessage, []byte(strings.Replace(string(msg), "ping", "pong", 1))); err != nil {
+				log.Println("[hadax] ws pong err:", err)
+				w.incrNotify("hadax")
+				i = i + 10
+				continue
+			}
+		} else {
+			if tmp := gjson.GetBytes(msg, "ch"); tmp.String() == "market.overview" {
+				if !gjson.Valid(string(msg)) {
+					log.Println("[hadax] invalid json")
+					w.incrNotify("hadax")
+					i = i + 5
+					continue
+				}
+				result := gjson.GetBytes(msg, "data")
+				if result.Exists() {
+					//现价数据
+					result.ForEach(func(key, value gjson.Result) bool {
+						symbol := strings.ToLower(value.Get("symbol").String())
+						coin := symbol[0 : len(symbol)-4]
+						market := symbol[len(symbol)-4 : len(symbol)]
+						now := time.Now().Format("20060102150405")
+						if symbol[len(symbol)-2:len(symbol)] == "ht" {
+							coin = symbol[0 : len(symbol)-2]
+							market = symbol[len(symbol)-2 : len(symbol)]
+						} else if market != "usdt" {
+							coin = symbol[0 : len(symbol)-3]
+							market = symbol[len(symbol)-3 : len(symbol)]
+						}
+						price := value.Get("close").Float()
+
+						var pencent float64 = 0
+						var upPrice float64 = 0
+						var upTime string
+						if _, platformExist := w.Platform24["hadax"]; platformExist {
+							w.Platform24["hadax"].Lock()
+							if prevPrice, prevExist := w.Platform24["hadax"].Data[coin+"-"+market]; prevExist {
+								if prevPrice.Price != 0 {
+									pencent = (price - prevPrice.Price) / prevPrice.Price
+								}
+								upPrice = prevPrice.Price
+								upTime = prevPrice.Time
+								w.Redis.Zadd("currentRank", []byte(coin+"|"+market+"|hadax"), pencent)
+							}
+							w.Platform24["hadax"].Unlock()
+						}
+
+						w.Platform["hadax"].Lock()
+						w.Platform["hadax"].Data[coin+"-"+market] = currentPrice{
+							symbol,
+							coin,
+							market,
+							price,
+							now,
+							upPrice,
+							upTime,
+							pencent,
+						}
+						w.Platform["hadax"].Unlock()
+						return true // keep iterating
+					})
+					//错误计数归零
+					w.setNotify("hadax", 0)
+					//wesocket错误计数归零
+					i = 0
+					//保存现价数据为文件
+					if len(w.OutDir) > 0 {
+						w.Platform["hadax"].Lock()
+						w.save(string(retrunJson("[hadax] ok", true, w.Platform["hadax"].Data)), "hadax")
+						w.Platform["hadax"].Unlock()
+					}
+				} else {
+					log.Println("[hadax] data nil")
+					w.incrNotify("hadax")
 					i = i + 5
 				}
 			}
