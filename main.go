@@ -513,6 +513,7 @@ func (w *Work) runWorkers() {
 		w.Platform["okex"].Unlock()
 		w.setNotify("okex", 0)
 		ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond)
+		w.runWorkerOkex()
 		for range ticker.C {
 			//for {
 			w.runWorkerOkex()
@@ -537,6 +538,7 @@ func (w *Work) runWorkers() {
 		w.Platform["binance"].Unlock()
 		w.setNotify("binance", 0)
 		ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond)
+		w.runWorkerBinance()
 		for range ticker.C {
 			//for {
 			w.runWorkerBinance()
@@ -561,6 +563,7 @@ func (w *Work) runWorkers() {
 		w.Platform["gate"].Unlock()
 		w.setNotify("gate", 0)
 		ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond)
+		w.runWorkerGate()
 		for range ticker.C {
 			//for {
 			w.runWorkerGate()
@@ -585,6 +588,7 @@ func (w *Work) runWorkers() {
 		w.Platform["zb"].Unlock()
 		w.setNotify("zb", 0)
 		ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond * 2)
+		w.runWorkerZb()
 		for range ticker.C {
 			//for {
 			w.runWorkerZb()
@@ -597,6 +601,31 @@ func (w *Work) runWorkers() {
 			//log.Println("[zb] http get", w.getNotify("zb"))
 		}
 		w.notify("[zb] 协程结束", "")
+	}()
+
+	// huilv http
+	go func() {
+		w.Lock()
+		w.Platform["huilv"] = new(currentPrices)
+		w.Unlock()
+		w.Platform["huilv"].Lock()
+		w.Platform["huilv"].Data = make(map[string]currentPrice)
+		w.Platform["huilv"].Unlock()
+		w.setNotify("huilv", 0)
+		ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond * 1000)
+		w.runWorkerHuilv()
+		for range ticker.C {
+			//for {
+			w.runWorkerHuilv()
+			// 超过10次错误后休息两分钟
+			if w.getNotify("huilv") > 10 {
+				w.notify("[huilv] currentPrice fail", "读取现价接口超过十次错误休息两分钟")
+				w.setNotify("huilv", 0)
+				time.Sleep(120 * time.Second)
+			}
+			//log.Println("[zb] http get", w.getNotify("zb"))
+		}
+		w.notify("[huilv] 协程结束", "")
 	}()
 
 	// 存储历史现价
@@ -890,6 +919,22 @@ func (w *Work) runWorkerHuobi() {
 							pencent,
 						}
 						w.Platform["huobi"].Unlock()
+
+						if _, platformExist := w.Platform["hadax"]; platformExist && (coin+"-"+market == "eth-usdt" || coin+"-"+market == "btc-usdt") {
+							w.Platform["hadax"].Lock()
+							w.Platform["hadax"].Data[coin+"-"+market] = currentPrice{
+								symbol,
+								coin,
+								market,
+								price,
+								now,
+								upPrice,
+								upTime,
+								pencent,
+							}
+							w.Platform["hadax"].Unlock()
+						}
+
 						return true // keep iterating
 					})
 					//错误计数归零
@@ -1444,6 +1489,105 @@ func (w *Work) runWorkerZb() {
 	} else {
 		log.Println("[zb] data nil")
 		w.incrNotify("zb")
+	}
+}
+
+// huilv
+func (w *Work) runWorkerHuilv() {
+	//现价接口
+	var err error
+
+	client, err := w.getHttpClient()
+	if err != nil {
+		log.Println("[huilv] ", err.Error())
+		w.incrNotify("huilv")
+		return
+	}
+
+	var req *http.Request
+	req, err = http.NewRequest("GET", "http://currency.tratao.com/api/ver2/exchange/latest", nil)
+
+	if err != nil {
+		log.Println("[huilv] ", err.Error())
+		w.incrNotify("huilv")
+		return
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Println("[huilv] ", err.Error())
+		w.incrNotify("huilv")
+		return
+	}
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+
+	//数据处理
+	if !gjson.Valid(string(body)) {
+		log.Println("[zb] invalid json")
+		w.incrNotify("zb")
+		return
+	}
+	result := gjson.Get(string(body), "list.0.resources")
+	if result.Exists() {
+		//现价数据
+		result.ForEach(func(key, value gjson.Result) bool {
+			symbol := strings.ToLower(value.Get("resource.fields.name").String())
+			if !strings.Contains(symbol, "/") {
+				return true
+			}
+			tmp := strings.Split(symbol, "/")
+			if len(tmp) != 2 {
+				log.Println("[huilv] invalid symbol", symbol)
+				w.incrNotify("huilv")
+				return true
+			}
+			coin := tmp[1]
+			market := tmp[0]
+			timestamp := value.Get("resource.fields.ts").Int()
+			now := time.Unix(timestamp, 0).Format("20060102150405")
+			//now := time.Now().Format("20060102150405")
+			price := value.Get("resource.fields.price").Float()
+
+			var pencent float64 = 0
+			var upPrice float64 = 0
+			var upTime string
+			if _, platformExist := w.Platform24["huilv"]; platformExist {
+				w.Platform24["huilv"].Lock()
+				if prevPrice, prevExist := w.Platform24["huilv"].Data[coin+"-"+market]; prevExist {
+					if prevPrice.Price != 0 {
+						pencent = (price - prevPrice.Price) / prevPrice.Price
+					}
+					upPrice = prevPrice.Price
+					upTime = prevPrice.Time
+					w.Redis.Zadd("currentRank", []byte(coin+"|"+market+"|huilv"), pencent)
+				}
+				w.Platform24["huilv"].Unlock()
+			}
+
+			w.Platform["huilv"].Lock()
+			w.Platform["huilv"].Data[coin+"-"+market] = currentPrice{
+				symbol,
+				coin,
+				market,
+				price,
+				now,
+				upPrice,
+				upTime,
+				pencent,
+			}
+			w.Platform["huilv"].Unlock()
+			return true // keep iterating
+		})
+		//错误计数归零
+		w.setNotify("huilv", 0)
+		//保存现价数据为文件
+		if len(w.OutDir) > 0 {
+			w.save(string(body), "huilv")
+		}
+	} else {
+		log.Println("[huilv] data nil")
+		w.incrNotify("huilv")
 	}
 }
 
