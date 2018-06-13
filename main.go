@@ -890,6 +890,9 @@ func (w *Work) runWorkerHuobi() {
 							market = symbol[len(symbol)-3 : len(symbol)]
 						}
 						price := value.Get("close").Float()
+						if price <= 0 {
+							//return true
+						}
 
 						var pencent float64 = 0
 						var upPrice float64 = 0
@@ -1050,6 +1053,9 @@ func (w *Work) runWorkerHadax() {
 							market = symbol[len(symbol)-3 : len(symbol)]
 						}
 						price := value.Get("close").Float()
+						if price <= 0 {
+							//return true
+						}
 
 						var pencent float64 = 0
 						var upPrice float64 = 0
@@ -1157,6 +1163,9 @@ func (w *Work) runWorkerOkex() {
 			market := tmp[1]
 			now := time.Now().Format("20060102150405")
 			price := value.Get("close").Float()
+			if price <= 0 {
+				//return true
+			}
 
 			var pencent float64 = 0
 			var upPrice float64 = 0
@@ -1253,6 +1262,9 @@ func (w *Work) runWorkerBinance() {
 				market = symbol[len(symbol)-3 : len(symbol)]
 			}
 			price := value.Get("price").Float()
+			if price <= 0 {
+				//return true
+			}
 
 			var pencent float64 = 0
 			var upPrice float64 = 0
@@ -1351,6 +1363,9 @@ func (w *Work) runWorkerGate() {
 			market := tmp[1]
 			now := time.Now().Format("20060102150405")
 			price := value.Get("last").Float()
+			if price <= 0 {
+				//return true
+			}
 
 			var pencent float64 = 0
 			var upPrice float64 = 0
@@ -1449,6 +1464,9 @@ func (w *Work) runWorkerZb() {
 			market := tmp[1]
 			now := time.Now().Format("20060102150405")
 			price := value.Get("lastPrice").Float()
+			if price <= 0 {
+				//return true
+			}
 
 			var pencent float64 = 0
 			var upPrice float64 = 0
@@ -1524,8 +1542,8 @@ func (w *Work) runWorkerHuilv() {
 
 	//数据处理
 	if !gjson.Valid(string(body)) {
-		log.Println("[zb] invalid json")
-		w.incrNotify("zb")
+		log.Println("[huilv] invalid json")
+		w.incrNotify("huilv")
 		return
 	}
 	result := gjson.Get(string(body), "list.0.resources")
@@ -1542,12 +1560,15 @@ func (w *Work) runWorkerHuilv() {
 				w.incrNotify("huilv")
 				return true
 			}
-			coin := tmp[1]
-			market := tmp[0]
+			coin := tmp[0]
+			market := tmp[1]
 			timestamp := value.Get("resource.fields.ts").Int()
 			now := time.Unix(timestamp, 0).Format("20060102150405")
 			//now := time.Now().Format("20060102150405")
 			price := value.Get("resource.fields.price").Float()
+			if price <= 0 {
+				//return true
+			}
 
 			var pencent float64 = 0
 			var upPrice float64 = 0
