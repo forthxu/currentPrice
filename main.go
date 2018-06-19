@@ -955,6 +955,8 @@ func (w *Work) runWorkerHuobi() {
 					w.incrNotify("huobi")
 					i = i + 5
 				}
+			} else {
+				i = i + 1
 			}
 		}
 
@@ -1102,6 +1104,8 @@ func (w *Work) runWorkerHadax() {
 					w.incrNotify("hadax")
 					i = i + 5
 				}
+			} else {
+				i = i + 1
 			}
 		}
 
