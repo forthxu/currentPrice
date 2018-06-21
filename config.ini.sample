@@ -12,3 +12,4 @@ savegap:30
 proxy:
 outdir: 
 info:form local
+bind:

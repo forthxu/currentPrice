@@ -2,7 +2,7 @@
 PATH=/usr/local/bin:/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/sbin
 
 # 定时命令
-# * * * * * root run.sh care >> care.log 2>&1
+# * * * * * www /bin/sh /web/currentPrice/bin/run.sh care >> /web/currentPrice/bin/log/care.log 2>&1
 
 # 工作目录
 WORKDIR=$(cd $(dirname $0); pwd)
@@ -14,10 +14,25 @@ elif [ "$(expr substr $(uname -s) 1 10)" == "MINGW32_NT" ];then
 	SP="\\"
 fi
 
+#日志记录
+log()
+{
+	echo `date +%Y-%m-%d`" $1"
+}
+
 # Server酱通知(http://sc.ftqq.com/3.version) token
 TOKEN=""
 BIN="currentPrice.bin"
 CONFIG="config.ini"
+
+#read -p "configFile:" CONFIG
+if [ -n "$2" ];then
+	if [ ! -f "$2" ];then
+		log "$2 not exist"
+		exit
+	fi
+	CONFIG=$2
+fi
 
 # 操作对象
 op='none'
@@ -28,13 +43,8 @@ fi
 # 消息通知函数
 notify()
 {
-	curl -o /dev/null -s "https://sc.ftqq.com/${TOKEN}.send?text=${BIN}${1}&desc=${2}";
+	curl -o /dev/null -s "https://sc.ftqq.com/${TOKEN}.send?text=${CONFIG}${1}&desc=${2}";
 }
-log()
-{
-	echo `date +%Y-%m-%d`" $1"
-}
-
 # pika
 pikaCount()
 {
