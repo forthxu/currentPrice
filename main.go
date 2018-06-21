@@ -1624,7 +1624,7 @@ func (w *Work) runWorkerHuilv() {
 			var upTimeX string
 			if _, platformExistX := w.Platform24["huilv"]; platformExistX {
 				w.Platform24["huilv"].Lock()
-				if prevPriceX, prevExistX := w.Platform24["huilv"].Data[market+"-"+g]; prevExistX {
+				if prevPriceX, prevExistX := w.Platform24["huilv"].Data[market+"-"+coin]; prevExistX {
 					if prevPriceX.Price != 0 {
 						pencentX = (priceX - prevPriceX.Price) / prevPriceX.Price
 					}
