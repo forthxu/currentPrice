@@ -2,7 +2,7 @@
 PATH=/usr/local/bin:/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/sbin
 
 # 定时命令
-# * * * * * www /bin/sh /web/currentPrice/bin/run.sh care >> /web/currentPrice/bin/log/care.log 2>&1
+# * * * * * www /bin/sh /web/currentPrice/bin/run.sh care config.ini >> /web/currentPrice/bin/log/care.log 2>&1
 
 # 工作目录
 WORKDIR=$(cd $(dirname $0); pwd)
@@ -13,6 +13,7 @@ elif [ "$(expr substr $(uname -s) 1 5)" == "Linux" ];then
 elif [ "$(expr substr $(uname -s) 1 10)" == "MINGW32_NT" ];then
 	SP="\\"
 fi
+cd $WORKDIR
 
 #日志记录
 log()
@@ -28,7 +29,7 @@ CONFIG="config.ini"
 #read -p "configFile:" CONFIG
 if [ -n "$2" ];then
 	if [ ! -f "$2" ];then
-		log "$2 not exist"
+		log "configFile: $2 not exist"
 		exit
 	fi
 	CONFIG=$2
@@ -43,12 +44,12 @@ fi
 # 消息通知函数
 notify()
 {
-	curl -o /dev/null -s "https://sc.ftqq.com/${TOKEN}.send?text=${CONFIG}${1}&desc=${2}";
+	curl -o /dev/null -s "https://sc.ftqq.com/${TOKEN}.send?text=${1// /%20}&desp=${2// /%20}";
 }
 # pika
 pikaCount()
 {
-	echo `ps  aux | grep 'pika' | grep -v 'grep' | wc -l`;
+	echo `ps  aux | grep -F 'pika' | grep -v -F 'grep' | wc -l`;
 }
 pikaStart()
 {
@@ -58,7 +59,7 @@ pikaStart()
 # redis
 redisCount()
 {
-	echo `ps  aux | grep 'redis-server' | grep -v 'grep' | wc -l`;
+	echo `ps  aux | grep -F 'redis-server' | grep -v -F 'grep' | wc -l`;
 }
 redisStart()
 {
@@ -68,7 +69,7 @@ redisStart()
 # currentPrice
 count()
 {
-	echo `ps  aux | grep $BIN | grep $CONFIG | grep -v 'grep' | wc -l`;
+	echo `ps  aux | grep -F $BIN | grep -F $CONFIG | grep -v -F 'grep' | wc -l`;
 }
 
 # 运行程序
@@ -83,24 +84,24 @@ run()
 	fi
 	local DATA_DAY=`date +%Y-%m-%d`
 	local DATA_SECOND=`date +%Y-%m-%d-%H-%M-%S`
-	local LOG_NAME="${WORKDIR}${SP}log${SP}${BIN}-${DATA_DAY}.log"
-	local BACKUP_LOG_NAME="${WORKDIR}${SP}log${SP}${BIN}-${DATA_SECOND}_bak.log"
+	local LOG_NAME="${WORKDIR}${SP}log${SP}${BIN}-$(basename $CONFIG)-${DATA_DAY}.log"
+	local BACKUP_LOG_NAME="${WORKDIR}${SP}log${SP}${BIN}-$(basename $CONFIG)-${DATA_SECOND}_bak.log"
 	#备份日志
 	if [ -a "${LOG_NAME}" ]; then
 		mv ${LOG_NAME} ${BACKUP_LOG_NAME}
 	fi
 
-	nohup $@ >> ${LOG_NAME} 2>&1 &
+	nohup ${WORKDIR}${SP}${BIN} -f ${CONFIG} >> ${LOG_NAME} 2>&1 &
 
-	log "运行程序："$@
-	log "bin: $BIN pid: $!  log: ${LOG_NAME} "
-	log "${BIN} 进程数：`count`"
+	log "启动程序: $BIN -f ${CONFIG} 进程ID: $!"
+	log "日志存储: ${LOG_NAME} "
+	log "当前进程数：`count`"
 	return $!
 }
 # 开始函数
 start()
 {
-	run ./${BIN} -f ${CONFIG}
+	run
 	return $!
 }
 # 结束函数
@@ -108,11 +109,11 @@ stop()
 {
 	local num=`count`
 	while [ $num -gt 0 ]; do
-		log "当前进程数："$num
-	    ps  aux | grep $BIN | grep $CONFIG | grep -v 'grep' | awk '{print $2}' | xargs -I {} kill -9 {}
+		log "等待结束进程数："$num
+	    ps  aux | grep -F $BIN | grep -F $CONFIG | grep -v -F 'grep' | awk '{print $2}' | xargs -I {} kill -9 {}
 	    num=`count`
 	done
-	log "当前进程数："$num
+	log "进程结束"
 
 	return $!
 }
@@ -123,7 +124,7 @@ careCurrentPrice()
 	if [ $num -lt 1 ];then
 		start
 		num=`count`
-		notify "现价接口挂掉重启~" "${BIN}进程数：$num"
+		notify "【$(basename $CONFIG)】现价程序挂掉重启~" "${BIN} -f ${CONFIG} 进程数：$num"
 	fi;
 }
 
@@ -134,7 +135,7 @@ carePika()
 		pikaStart
 		num=`pikaCount`
 		notify "pika挂掉重启~" "pika进程数：$num"
-		log "pika restart,${BIN}进程数：$num" 
+		log "pika restart,进程数：$num" 
 	fi;
 }
 
@@ -145,7 +146,7 @@ careRedis()
 		redisStart
 		num=`redisCount`
 		notify "redis挂掉重启~" "redis进程数：$num"
-		log "redis restart,${BIN}进程数：$num" 
+		log "redis restart,进程数：$num" 
 	fi;
 }
 
@@ -153,7 +154,7 @@ careRedis()
 case $op in 
 	care) 
 		#carePika
-		careRedis
+		#careRedis
 		careCurrentPrice
 	;;
 	start | begin) 
@@ -172,7 +173,7 @@ case $op in
 	status) 
 		#log "pika进程数：`pikaCount`" 
 		log "redis进程数：`redisCount`" 
-		log "${BIN}进程数：`count`" 
+		log "${BIN} ${CONFIG}进程数：`count`" 
 		
 	;;
 	*) 

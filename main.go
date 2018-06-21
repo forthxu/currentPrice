@@ -478,9 +478,11 @@ func (w *Work) runWorkers() {
 		w.Lock()
 		w.Platform["huobi"] = new(currentPrices)
 		w.Unlock()
+
 		w.Platform["huobi"].Lock()
 		w.Platform["huobi"].Data = make(map[string]currentPrice)
 		w.Platform["huobi"].Unlock()
+
 		w.setNotify("huobi", 0)
 		for {
 			w.runWorkerHuobi()
@@ -500,9 +502,11 @@ func (w *Work) runWorkers() {
 		w.Lock()
 		w.Platform["hadax"] = new(currentPrices)
 		w.Unlock()
+
 		w.Platform["hadax"].Lock()
 		w.Platform["hadax"].Data = make(map[string]currentPrice)
 		w.Platform["hadax"].Unlock()
+
 		w.setNotify("hadax", 0)
 		for {
 			w.runWorkerHadax()
@@ -522,9 +526,11 @@ func (w *Work) runWorkers() {
 		w.Lock()
 		w.Platform["okex"] = new(currentPrices)
 		w.Unlock()
+
 		w.Platform["okex"].Lock()
 		w.Platform["okex"].Data = make(map[string]currentPrice)
 		w.Platform["okex"].Unlock()
+
 		w.setNotify("okex", 0)
 		ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond)
 		w.runWorkerOkex()
@@ -545,9 +551,11 @@ func (w *Work) runWorkers() {
 		w.Lock()
 		w.Platform["binance"] = new(currentPrices)
 		w.Unlock()
+
 		w.Platform["binance"].Lock()
 		w.Platform["binance"].Data = make(map[string]currentPrice)
 		w.Platform["binance"].Unlock()
+
 		w.setNotify("binance", 0)
 		ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond)
 		w.runWorkerBinance()
@@ -568,9 +576,11 @@ func (w *Work) runWorkers() {
 		w.Lock()
 		w.Platform["gate"] = new(currentPrices)
 		w.Unlock()
+
 		w.Platform["gate"].Lock()
 		w.Platform["gate"].Data = make(map[string]currentPrice)
 		w.Platform["gate"].Unlock()
+
 		w.setNotify("gate", 0)
 		ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond)
 		w.runWorkerGate()
@@ -591,9 +601,11 @@ func (w *Work) runWorkers() {
 		w.Lock()
 		w.Platform["zb"] = new(currentPrices)
 		w.Unlock()
+
 		w.Platform["zb"].Lock()
 		w.Platform["zb"].Data = make(map[string]currentPrice)
 		w.Platform["zb"].Unlock()
+
 		w.setNotify("zb", 0)
 		ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond * 2)
 		w.runWorkerZb()
@@ -615,9 +627,11 @@ func (w *Work) runWorkers() {
 		w.Lock()
 		w.Platform["huilv"] = new(currentPrices)
 		w.Unlock()
+
 		w.Platform["huilv"].Lock()
 		w.Platform["huilv"].Data = make(map[string]currentPrice)
 		w.Platform["huilv"].Unlock()
+
 		w.setNotify("huilv", 0)
 		ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond * 1000)
 		w.runWorkerHuilv()
