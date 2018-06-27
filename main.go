@@ -521,6 +521,30 @@ func (w *Work) runWorkers() {
 		w.notify("[hadax] 协程结束", "")
 	}()
 
+	// fcoin websocket
+	go func() {
+		w.Lock()
+		w.Platform["fcoin"] = new(currentPrices)
+		w.Unlock()
+
+		w.Platform["fcoin"].Lock()
+		w.Platform["fcoin"].Data = make(map[string]currentPrice)
+		w.Platform["fcoin"].Unlock()
+
+		w.setNotify("fcoin", 0)
+		for {
+			w.runWorkerFcoin()
+			// 超过5次错误后休息一分钟
+			if w.getNotify("fcoin") > 5 {
+				w.notify("[fcoin] currentPrice fail", "读取现价接口超过五次错误休息一分钟")
+				w.setNotify("fcoin", 0)
+				time.Sleep(60 * time.Second)
+			}
+			log.Println("[fcoin] websocket reconnecting ", w.getNotify("fcoin"))
+		}
+		w.notify("[fcoin] 协程结束", "")
+	}()
+
 	// okex http
 	go func() {
 		w.Lock()
@@ -846,7 +870,7 @@ func (w *Work) runWorkerHuobi() {
 		w.incrNotify("huobi")
 		return
 	}
-	log.Println("[huobi] huobi websocket connected")
+	log.Println("[huobi] websocket connected")
 
 	//数据
 	var i int = 0                                             //websocket出错多次退出
@@ -1016,7 +1040,7 @@ func (w *Work) runWorkerHadax() {
 		w.incrNotify("hadax")
 		return
 	}
-	log.Println("[hadax] hadax websocket connected")
+	log.Println("[hadax] websocket connected")
 
 	//数据
 	var i int = 0                                             //websocket出错多次退出
@@ -1129,6 +1153,161 @@ ForEnd:
 					} else {
 						log.Println("[hadax] data nil")
 						w.incrNotify("hadax")
+						i = i + 5
+					}
+				} else {
+					i = i + 1
+				}
+			}
+		}
+	}
+}
+
+// fcoin现价
+func (w *Work) runWorkerFcoin() {
+	//连接websocket
+	var u url.URL
+	//if len(w.Proxy) == 0 {
+	u = url.URL{Scheme: "wss", Host: "api.fcoin.com", Path: "/v2/ws"}
+	//} else {
+	//	u = url.URL{Scheme: "ws", Host: w.Proxy, Path: "/fcoin/v2/ws"}
+	//}
+
+	DefaultDialer, err := w.getWebsocketClient()
+	if err != nil {
+		log.Println("[fcoin] ", err.Error())
+		w.incrNotify("fcoin")
+		return
+	}
+	ws, _, err := DefaultDialer.Dial(u.String(), nil)
+	if err != nil {
+		log.Println("[fcoin] ", err.Error())
+		w.incrNotify("fcoin")
+		return
+	}
+	defer ws.Close()
+
+	//订阅现价数据
+	err = ws.WriteMessage(websocket.TextMessage, []byte("{\"cmd\":\"sub\",\"args\":[\"all-tickers\"],\"id\":\"20271c80-79d1-11e8-8fa7-e1d825d3873b\"}"))
+	if err != nil {
+		log.Println("[fcoin] ", err)
+		w.incrNotify("fcoin")
+		return
+	}
+	log.Println("[fcoin] websocket connected")
+
+	//数据
+	var i int = 0                                             //websocket出错多次退出
+	timeout := time.After(time.Second * time.Duration(86400)) //超时退出
+ForEnd:
+	for {
+		select {
+		case <-timeout:
+			log.Println("[fcoin] timeout")
+			break ForEnd
+		default:
+			//多次出错后重连
+			if i > 100 {
+				log.Println("[fcoin] too many err:", i)
+				break ForEnd
+			}
+
+			//阻塞读取数据
+			_, originMsg, err := ws.ReadMessage()
+			if err != nil {
+				log.Println("[fcoin] ws read err:", err)
+				w.incrNotify("fcoin")
+				i = i + 40
+				continue ForEnd
+			}
+			//解压数据
+			/*
+				msg, err := GzipDecode(originMsg)
+				if err != nil {
+					log.Println("[fcoin] gzip decode err:", err)
+					w.incrNotify("fcoin")
+					i = i + 10
+					continue ForEnd
+				}
+			*/
+			msg := originMsg
+
+			if strings.Contains(string(msg), "ping") { //心跳
+				log.Println("[fcoin] ws ping msg:", string(msg))
+				w.incrNotify("fcoin")
+				i = i + 10
+				continue ForEnd
+			} else {
+				if tmp := gjson.GetBytes(msg, "topic"); tmp.String() == "all-tickers" {
+					if !gjson.Valid(string(msg)) {
+						log.Println("[fcoin] invalid json")
+						w.incrNotify("fcoin")
+						i = i + 5
+						continue ForEnd
+					}
+					result := gjson.GetBytes(msg, "tickers")
+					if result.Exists() {
+						//现价数据
+						result.ForEach(func(key, value gjson.Result) bool {
+							symbol := strings.ToLower(value.Get("symbol").String())
+							coin := symbol[0 : len(symbol)-4]
+							market := symbol[len(symbol)-4 : len(symbol)]
+							now := time.Now().Format("20060102150405")
+							if symbol[len(symbol)-2:len(symbol)] == "ft" {
+								coin = symbol[0 : len(symbol)-2]
+								market = symbol[len(symbol)-2 : len(symbol)]
+							} else if market != "usdt" {
+								coin = symbol[0 : len(symbol)-3]
+								market = symbol[len(symbol)-3 : len(symbol)]
+							}
+							price := value.Get("ticker.0").Float()
+							if price <= 0 {
+								//return true
+							}
+
+							var pencent float64 = 0
+							var upPrice float64 = 0
+							var upTime string
+							if _, platformExist := w.Platform24["fcoin"]; platformExist {
+								w.Platform24["fcoin"].Lock()
+								if prevPrice, prevExist := w.Platform24["fcoin"].Data[coin+"-"+market]; prevExist {
+									if prevPrice.Price != 0 {
+										pencent = (price - prevPrice.Price) / prevPrice.Price
+									}
+									upPrice = prevPrice.Price
+									upTime = prevPrice.Time
+									w.Redis.Zadd("currentRank", []byte(coin+"|"+market+"|fcoin"), pencent)
+								}
+								w.Platform24["fcoin"].Unlock()
+							}
+
+							w.Platform["fcoin"].Lock()
+							w.Platform["fcoin"].Data[coin+"-"+market] = currentPrice{
+								symbol,
+								coin,
+								market,
+								price,
+								now,
+								upPrice,
+								upTime,
+								pencent,
+							}
+							w.Platform["fcoin"].Unlock()
+							return true // keep iterating
+						})
+						//错误计数归零
+						w.setNotify("fcoin", 0)
+						//wesocket错误计数归零
+						i = 0
+						//保存现价数据为文件
+						if len(w.OutDir) > 0 {
+							w.Platform["fcoin"].Lock()
+							w.save(string(retrunJson("[fcoin] ok", true, w.Platform["fcoin"].Data)), "fcoin")
+							w.Platform["fcoin"].Unlock()
+						}
+					} else {
+						log.Println("[fcoin] data nil")
+						w.incrNotify("fcoin")
 						i = i + 5
 					}
 				} else {
