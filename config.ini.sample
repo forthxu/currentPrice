@@ -10,6 +10,7 @@ token:
 gap:1000
 savegap:30
 proxy:
+nginxproxy:
 outdir: 
 info:form local
 bind:

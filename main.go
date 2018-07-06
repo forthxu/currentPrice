@@ -12,6 +12,7 @@ import (
 	"github.com/forthxu/websocket"
 	"github.com/larspensjo/config"
 	"github.com/tidwall/gjson"
+	"golang.org/x/net/proxy"
 	"io"
 	"io/ioutil"
 	"log"
@@ -60,7 +61,8 @@ func main() {
 		token       string            = ""        // Server酱通知(http://sc.ftqq.com/3.version) token
 		gap         int               = 1000      // 取数据的的基础间隔时间，默认1000毫秒
 		savegap     int               = 600       // 保存24H数据的间隔时间，用于比较涨跌幅
-		proxy       string            = ""        // nginx代理的地址
+		proxy       string            = ""        // 代理的地址
+		nginxProxy  string            = ""        // nginx代理的地址
 		outDir      string            = ""        // 数据输出成文件，默认空不输出成文件
 		info        string            = "default" // 程序运行标志
 		bind        string            = ""        // 绑定本地出口ip
@@ -100,6 +102,9 @@ func main() {
 		if data, err := cfg.String("app", "proxy"); err == nil {
 			proxy = data
 		}
+		if data, err := cfg.String("app", "nginxproxy"); err == nil {
+			nginxProxy = data
+		}
 		if data, err := cfg.String("app", "outdir"); err == nil {
 			outDir = data
 		}
@@ -119,6 +124,7 @@ func main() {
 		Gap:         gap,
 		SaveGap:     savegap,
 		Proxy:       proxy,
+		NginxProxy:  nginxProxy,
 		OutDir:      outDir,
 		RedisConfig: redisConfig,
 		Info:        info,
@@ -134,6 +140,7 @@ func main() {
 	log.Println("[app] gap time:", w.Gap, "Millisecond")
 	log.Println("[app] savegap time:", w.SaveGap, "Second")
 	log.Println("[app] proxy:", w.Proxy)
+	log.Println("[app] nginxProxy:", w.NginxProxy)
 	log.Println("[app] bind local ip:", w.Bind)
 	log.Println("[app] outDir:", w.OutDir)
 	log.Println("[app] info:", w.Info)
@@ -208,18 +215,60 @@ func (w *Work) bindIP() (*http.Transport, error) {
 }
 
 func (w *Work) getHttpClient() (*http.Client, error) {
-	/*
-		urli := url.URL{}
-		urlproxy, _ := urli.Parse("https://127.0.0.1:1088")
-		client := &http.Client{
+	var client *http.Client
+	if strings.HasPrefix(w.Proxy, "http") {
+		urlParse := url.URL{}
+		urlProxy, err := urlParse.Parse(w.Proxy)
+		if err != nil {
+			return nil, err
+		}
+
+		client = &http.Client{
 			Transport: &http.Transport{
-				Proxy: http.ProxyURL(urlproxy),
+				Proxy: http.ProxyURL(urlProxy),
 			},
 		}
-	*/
+	} else if strings.HasPrefix(w.Proxy, "socks5://") {
+		var auths_hosts, auths []string
+		var hosts string
+		var auth *proxy.Auth
+		auths_hosts = strings.Split(strings.Replace(w.Proxy, "socks5://", "", -1), "@")
+		if len(auths_hosts) == 2 {
+			auths = strings.Split(auths_hosts[0], ":")
+			if len(auths) == 2 {
+				auth = &proxy.Auth{User: auths[0], Password: auths[1]}
+			} else {
+				auth = &proxy.Auth{User: auths[0], Password: ""}
+			}
+			hosts = auths_hosts[1]
+		} else {
+			auth = nil
+			hosts = auths_hosts[0]
+		}
+		dialer, err := proxy.SOCKS5(
+			"tcp",
+			hosts,
+			auth,
+			&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
 
-	client := &http.Client{
-	//Timeout: time.Duration(8) * time.Second,
+		client = &http.Client{
+			Transport: &http.Transport{
+				Proxy:               nil,
+				Dial:                dialer.Dial,
+				TLSHandshakeTimeout: 10 * time.Second,
+			},
+		}
+	} else {
+		client = &http.Client{
+			Timeout: time.Duration(30) * time.Second,
+		}
 	}
 
 	if len(w.Bind) > 0 {
@@ -248,13 +297,61 @@ func (w *Work) getHttpClient() (*http.Client, error) {
 }
 
 func (w *Work) getWebsocketClient() (*websocket.Dialer, error) {
-	var DefaultDialer = &websocket.Dialer{
-		Proxy: http.ProxyFromEnvironment,
+	var client *websocket.Dialer
+	if strings.HasPrefix(w.Proxy, "http://") {
+		urlParse := url.URL{}
+		urlProxy, err := urlParse.Parse(w.Proxy)
+		if err != nil {
+			return nil, err
+		}
+
+		client = &websocket.Dialer{
+			Proxy: http.ProxyURL(urlProxy),
+		}
+	} else if strings.HasPrefix(w.Proxy, "socks5://") {
+		var auths_hosts, auths []string
+		var hosts string
+		var auth *proxy.Auth
+		auths_hosts = strings.Split(strings.Replace(w.Proxy, "socks5://", "", -1), "@")
+		if len(auths_hosts) == 2 {
+			auths = strings.Split(auths_hosts[0], ":")
+			if len(auths) == 2 {
+				auth = &proxy.Auth{User: auths[0], Password: auths[1]}
+			} else {
+				auth = &proxy.Auth{User: auths[0], Password: ""}
+			}
+			hosts = auths_hosts[1]
+		} else {
+			auth = nil
+			hosts = auths_hosts[0]
+		}
+		dialer, err := proxy.SOCKS5(
+			"tcp",
+			hosts,
+			auth,
+			&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		client = &websocket.Dialer{
+			NetDial: dialer.Dial,
+		}
+	} else {
+		client = &websocket.Dialer{
+			Proxy: http.ProxyFromEnvironment,
+		}
 	}
+
 	if len(w.Bind) > 0 {
-		DefaultDialer.LocalAddr = w.Bind
+		client.LocalAddr = w.Bind
 	}
-	return DefaultDialer, nil
+
+	return client, nil
 }
 
 //http线程返回结果结构函数
@@ -290,6 +387,7 @@ type Work struct {
 	Gap         int
 	SaveGap     int
 	Proxy       string
+	NginxProxy  string
 	OutDir      string
 	RedisConfig map[string]string
 	Redis       goredis.Client
@@ -843,10 +941,10 @@ func GzipDecode(in []byte) ([]byte, error) {
 func (w *Work) runWorkerHuobi() {
 	//连接websocket
 	var u url.URL
-	if len(w.Proxy) == 0 {
+	if len(w.NginxProxy) == 0 {
 		u = url.URL{Scheme: "ws", Host: "api.huobi.pro", Path: "/ws"}
 	} else {
-		u = url.URL{Scheme: "ws", Host: w.Proxy, Path: "/huobi/ws"}
+		u = url.URL{Scheme: "ws", Host: w.NginxProxy, Path: "/huobi/ws"}
 	}
 
 	DefaultDialer, err := w.getWebsocketClient()
@@ -1013,10 +1111,10 @@ ForEnd:
 func (w *Work) runWorkerHadax() {
 	//连接websocket
 	var u url.URL
-	if len(w.Proxy) == 0 {
+	if len(w.NginxProxy) == 0 {
 		u = url.URL{Scheme: "wss", Host: "www.huobi.br.com", Path: "/-/s/hdx/ws"}
 	} else {
-		u = url.URL{Scheme: "ws", Host: w.Proxy, Path: "/hadax/ws"}
+		u = url.URL{Scheme: "ws", Host: w.NginxProxy, Path: "/hadax/ws"}
 	}
 
 	DefaultDialer, err := w.getWebsocketClient()
@@ -1167,10 +1265,10 @@ ForEnd:
 func (w *Work) runWorkerFcoin() {
 	//连接websocket
 	var u url.URL
-	//if len(w.Proxy) == 0 {
+	//if len(w.NginxProxy) == 0 {
 	u = url.URL{Scheme: "wss", Host: "api.fcoin.com", Path: "/v2/ws"}
 	//} else {
-	//	u = url.URL{Scheme: "ws", Host: w.Proxy, Path: "/fcoin/v2/ws"}
+	//	u = url.URL{Scheme: "ws", Host: w.NginxProxy, Path: "/fcoin/v2/ws"}
 	//}
 
 	DefaultDialer, err := w.getWebsocketClient()
@@ -1331,12 +1429,12 @@ func (w *Work) runWorkerOkex() {
 	}
 
 	var req *http.Request
-	if len(w.Proxy) == 0 {
+	if len(w.NginxProxy) == 0 {
 		req, err = http.NewRequest("GET", "https://www.okex.com/v2/spot/markets/tickers", nil)
 	} else {
-		req, err = http.NewRequest("GET", "http://"+w.Proxy+"/okex/v2/spot/markets/tickers", nil)
+		req, err = http.NewRequest("GET", "http://"+w.NginxProxy+"/okex/v2/spot/markets/tickers", nil)
 	}
-	//req.Header.Add("auth", "good")
+
 	if err != nil {
 		log.Println("[okex] ", err.Error())
 		w.incrNotify("okex")
@@ -1432,10 +1530,10 @@ func (w *Work) runWorkerBinance() {
 	}
 
 	var req *http.Request
-	if len(w.Proxy) == 0 {
+	if len(w.NginxProxy) == 0 {
 		req, err = http.NewRequest("GET", "https://www.binance.com/api/v3/ticker/price", nil)
 	} else {
-		req, err = http.NewRequest("GET", "http://"+w.Proxy+"/binance/api/v3/ticker/price", nil)
+		req, err = http.NewRequest("GET", "http://"+w.NginxProxy+"/binance/api/v3/ticker/price", nil)
 	}
 
 	if err != nil {
@@ -1531,10 +1629,10 @@ func (w *Work) runWorkerGate() {
 	}
 
 	var req *http.Request
-	if len(w.Proxy) == 0 {
+	if len(w.NginxProxy) == 0 {
 		req, err = http.NewRequest("GET", "http://data.gate.io/api2/1/tickers", nil)
 	} else {
-		req, err = http.NewRequest("GET", "http://"+w.Proxy+"/gate/api2/1/tickers", nil)
+		req, err = http.NewRequest("GET", "http://"+w.NginxProxy+"/gate/api2/1/tickers", nil)
 	}
 
 	if err != nil {
@@ -1632,11 +1730,12 @@ func (w *Work) runWorkerZb() {
 	}
 
 	var req *http.Request
-	if len(w.Proxy) == 0 {
+	if len(w.NginxProxy) == 0 {
 		req, err = http.NewRequest("GET", "https://trans.zb.com/line/topall", nil)
 	} else {
-		req, err = http.NewRequest("GET", "http://"+w.Proxy+"/zb/line/topall", nil)
+		req, err = http.NewRequest("GET", "http://"+w.NginxProxy+"/zb/line/topall", nil)
 	}
+	//req, err = http.NewRequest("GET", "http://119.28.65.128:30026/line/topall", nil)
 
 	if err != nil {
 		log.Println("[zb] ", err.Error())
