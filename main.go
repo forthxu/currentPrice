@@ -67,6 +67,7 @@ func main() {
 		info        string            = "default" // 程序运行标志
 		bind        string            = ""        // 绑定本地出口ip
 		redisConfig map[string]string = make(map[string]string)
+		debug       bool              = false
 	)
 	cfg, err := config.ReadDefault(configFile)
 	if err != nil {
@@ -114,6 +115,15 @@ func main() {
 		if data, err := cfg.String("app", "bind"); err == nil {
 			bind = data
 		}
+		if data, err := cfg.Bool("app", "debug"); err == nil {
+			debug = data
+		}
+	}
+	//日志配置
+	if debug {
+		log.SetFlags(log.LstdFlags | log.Lshortfile) //带文件行号的日志
+	} else {
+		log.SetFlags(log.LstdFlags)
 	}
 
 	//初始工作对象
@@ -144,6 +154,7 @@ func main() {
 	log.Println("[app] bind local ip:", w.Bind)
 	log.Println("[app] outDir:", w.OutDir)
 	log.Println("[app] info:", w.Info)
+	log.Println("[app] debug:", debug)
 
 	//开始工作
 	w.initRedis()
