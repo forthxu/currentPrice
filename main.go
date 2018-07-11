@@ -16,6 +16,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/url"
@@ -226,6 +227,7 @@ func (w *Work) bindIP() (*http.Transport, error) {
 }
 
 func (w *Work) getHttpClient() (*http.Client, error) {
+	var timeout int = 30
 	var client *http.Client
 	if strings.HasPrefix(w.Proxy, "http") {
 		urlParse := url.URL{}
@@ -238,6 +240,7 @@ func (w *Work) getHttpClient() (*http.Client, error) {
 			Transport: &http.Transport{
 				Proxy: http.ProxyURL(urlProxy),
 			},
+			Timeout: time.Duration(timeout) * time.Second,
 		}
 	} else if strings.HasPrefix(w.Proxy, "socks5://") {
 		var auths_hosts, auths []string
@@ -261,8 +264,8 @@ func (w *Work) getHttpClient() (*http.Client, error) {
 			hosts,
 			auth,
 			&net.Dialer{
-				Timeout:   30 * time.Second,
-				KeepAlive: 30 * time.Second,
+				Timeout:   time.Duration(timeout) * time.Second,
+				KeepAlive: time.Duration(timeout) * time.Second,
 			},
 		)
 		if err != nil {
@@ -273,12 +276,13 @@ func (w *Work) getHttpClient() (*http.Client, error) {
 			Transport: &http.Transport{
 				Proxy:               nil,
 				Dial:                dialer.Dial,
-				TLSHandshakeTimeout: 10 * time.Second,
+				TLSHandshakeTimeout: time.Duration(timeout) * time.Second,
 			},
+			Timeout: time.Duration(timeout) * time.Second,
 		}
 	} else {
 		client = &http.Client{
-			Timeout: time.Duration(30) * time.Second,
+			Timeout: time.Duration(timeout) * time.Second,
 		}
 	}
 
@@ -292,14 +296,14 @@ func (w *Work) getHttpClient() (*http.Client, error) {
 		}
 		d := net.Dialer{
 			LocalAddr: &localTCPAddr,
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
+			Timeout:   time.Duration(timeout) * time.Second,
+			KeepAlive: time.Duration(timeout) * time.Second,
 		}
 
 		tr := &http.Transport{
 			Proxy:               http.ProxyFromEnvironment,
 			Dial:                d.Dial,
-			TLSHandshakeTimeout: 10 * time.Second,
+			TLSHandshakeTimeout: time.Duration(timeout) * time.Second,
 		}
 		client.Transport = tr
 	}
@@ -308,6 +312,7 @@ func (w *Work) getHttpClient() (*http.Client, error) {
 }
 
 func (w *Work) getWebsocketClient() (*websocket.Dialer, error) {
+	var timeout int = 30
 	var client *websocket.Dialer
 	if strings.HasPrefix(w.Proxy, "http://") {
 		urlParse := url.URL{}
@@ -341,8 +346,8 @@ func (w *Work) getWebsocketClient() (*websocket.Dialer, error) {
 			hosts,
 			auth,
 			&net.Dialer{
-				Timeout:   30 * time.Second,
-				KeepAlive: 30 * time.Second,
+				Timeout: time.Duration(timeout) * time.Second,
+				//KeepAlive: time.Duration(timeout) * time.Second,
 			},
 		)
 		if err != nil {
@@ -597,6 +602,7 @@ func (w *Work) runWorkers() {
 			w.runWorkerHuobi()
 			// 超过5次错误后休息一分钟
 			if w.getNotify("huobi") > 5 {
+				log.Println("[huobi] 读取现价接口超过五次错误休息一分钟 ")
 				w.notify("[huobi] currentPrice fail", "读取现价接口超过五次错误休息一分钟")
 				w.setNotify("huobi", 0)
 				time.Sleep(60 * time.Second)
@@ -621,6 +627,7 @@ func (w *Work) runWorkers() {
 			w.runWorkerHadax()
 			// 超过5次错误后休息一分钟
 			if w.getNotify("hadax") > 5 {
+				log.Println("[hadax] 读取现价接口超过五次错误休息一分钟 ")
 				w.notify("[hadax] currentPrice fail", "读取现价接口超过五次错误休息一分钟")
 				w.setNotify("hadax", 0)
 				time.Sleep(60 * time.Second)
@@ -645,6 +652,7 @@ func (w *Work) runWorkers() {
 			w.runWorkerFcoin()
 			// 超过5次错误后休息一分钟
 			if w.getNotify("fcoin") > 5 {
+				log.Println("[fcoin] 读取现价接口超过五次错误休息一分钟 ")
 				w.notify("[fcoin] currentPrice fail", "读取现价接口超过五次错误休息一分钟")
 				w.setNotify("fcoin", 0)
 				time.Sleep(60 * time.Second)
@@ -671,6 +679,7 @@ func (w *Work) runWorkers() {
 			w.runWorkerOkex()
 			// 超过10次错误后休息两分钟
 			if w.getNotify("okex") > 10 {
+				log.Println("[okex] 读取现价接口超过十次错误休息两分钟 ")
 				w.notify("[okex] currentPrice fail", "读取现价接口超过十次错误休息两分钟")
 				w.setNotify("okex", 0)
 				time.Sleep(120 * time.Second)
@@ -696,6 +705,7 @@ func (w *Work) runWorkers() {
 			w.runWorkerBinance()
 			// 超过10次错误后休息两分钟
 			if w.getNotify("binance") > 10 {
+				log.Println("[binance] 读取现价接口超过十次错误休息两分钟 ")
 				w.notify("[binance] currentPrice fail", "读取现价接口超过十次错误休息两分钟")
 				w.setNotify("binance", 0)
 				time.Sleep(120 * time.Second)
@@ -721,6 +731,7 @@ func (w *Work) runWorkers() {
 			w.runWorkerGate()
 			// 超过10次错误后休息两分钟
 			if w.getNotify("gate") > 10 {
+				log.Println("[gate] 读取现价接口超过十次错误休息两分钟 ")
 				w.notify("[gate] currentPrice fail", "读取现价接口超过十次错误休息两分钟")
 				w.setNotify("gate", 0)
 				time.Sleep(120 * time.Second)
@@ -740,13 +751,14 @@ func (w *Work) runWorkers() {
 		w.Platform["zb"].Unlock()
 
 		w.setNotify("zb", 0)
-		ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond * 2)
+		ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond)
 		w.runWorkerZb()
 		for range ticker.C {
 			//for {
 			w.runWorkerZb()
 			// 超过10次错误后休息两分钟
 			if w.getNotify("zb") > 10 {
+				log.Println("[zb] 读取现价接口超过十次错误休息两分钟 ")
 				w.notify("[zb] currentPrice fail", "读取现价接口超过十次错误休息两分钟")
 				w.setNotify("zb", 0)
 				time.Sleep(120 * time.Second)
@@ -766,12 +778,13 @@ func (w *Work) runWorkers() {
 		w.Platform["huilv"].Unlock()
 
 		w.setNotify("huilv", 0)
-		ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond * 1000)
+		ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond * 100)
 		w.runWorkerHuilv()
 		for range ticker.C {
 			w.runWorkerHuilv()
 			// 超过10次错误后休息两分钟
 			if w.getNotify("huilv") > 10 {
+				log.Println("[huilv] 读取现价接口超过十次错误休息两分钟 ")
 				w.notify("[huilv] currentPrice fail", "读取现价接口超过十次错误休息两分钟")
 				w.setNotify("huilv", 0)
 				time.Sleep(120 * time.Second)
@@ -964,7 +977,8 @@ func (w *Work) runWorkerHuobi() {
 		w.incrNotify("huobi")
 		return
 	}
-	ws, _, err := DefaultDialer.Dial(u.String(), nil)
+	header := http.Header{"User-Agent": []string{"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/67.0.3396.99 Safari/537.36"}}
+	ws, _, err := DefaultDialer.Dial(u.String(), header)
 	if err != nil {
 		log.Println("[huobi] ", err.Error())
 		w.incrNotify("huobi")
@@ -982,8 +996,8 @@ func (w *Work) runWorkerHuobi() {
 	log.Println("[huobi] websocket connected")
 
 	//数据
-	var i int = 0                                             //websocket出错多次退出
-	timeout := time.After(time.Second * time.Duration(86400)) //超时退出
+	var i int = 0                                            //websocket出错多次退出
+	timeout := time.After(time.Second * time.Duration(3600)) //超时退出
 ForEnd:
 	for {
 		select {
@@ -1134,7 +1148,8 @@ func (w *Work) runWorkerHadax() {
 		w.incrNotify("hadax")
 		return
 	}
-	ws, _, err := DefaultDialer.Dial(u.String(), nil)
+	header := http.Header{"User-Agent": []string{"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/67.0.3396.99 Safari/537.36"}}
+	ws, _, err := DefaultDialer.Dial(u.String(), header)
 	if err != nil {
 		log.Println("[hadax] ", err.Error())
 		w.incrNotify("hadax")
@@ -1152,8 +1167,8 @@ func (w *Work) runWorkerHadax() {
 	log.Println("[hadax] websocket connected")
 
 	//数据
-	var i int = 0                                             //websocket出错多次退出
-	timeout := time.After(time.Second * time.Duration(86400)) //超时退出
+	var i int = 0                                            //websocket出错多次退出
+	timeout := time.After(time.Second * time.Duration(3600)) //超时退出
 ForEnd:
 	for {
 		select {
@@ -1276,11 +1291,11 @@ ForEnd:
 func (w *Work) runWorkerFcoin() {
 	//连接websocket
 	var u url.URL
-	//if len(w.NginxProxy) == 0 {
-	u = url.URL{Scheme: "wss", Host: "api.fcoin.com", Path: "/v2/ws"}
-	//} else {
-	//	u = url.URL{Scheme: "ws", Host: w.NginxProxy, Path: "/fcoin/v2/ws"}
-	//}
+	if len(w.NginxProxy) == 0 {
+		u = url.URL{Scheme: "wss", Host: "api.fcoin.com", Path: "/v2/ws"}
+	} else {
+		u = url.URL{Scheme: "ws", Host: w.NginxProxy, Path: "/fcoin/ws"}
+	}
 
 	DefaultDialer, err := w.getWebsocketClient()
 	if err != nil {
@@ -1288,7 +1303,8 @@ func (w *Work) runWorkerFcoin() {
 		w.incrNotify("fcoin")
 		return
 	}
-	ws, _, err := DefaultDialer.Dial(u.String(), nil)
+	header := http.Header{"User-Agent": []string{"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/67.0.3396.99 Safari/537.36"}}
+	ws, _, err := DefaultDialer.Dial(u.String(), header)
 	if err != nil {
 		log.Println("[fcoin] ", err.Error())
 		w.incrNotify("fcoin")
@@ -1306,8 +1322,8 @@ func (w *Work) runWorkerFcoin() {
 	log.Println("[fcoin] websocket connected")
 
 	//数据
-	var i int = 0                                             //websocket出错多次退出
-	timeout := time.After(time.Second * time.Duration(86400)) //超时退出
+	var i int = 0                                            //websocket出错多次退出
+	timeout := time.After(time.Second * time.Duration(3600)) //超时退出
 ForEnd:
 	for {
 		select {
@@ -1451,6 +1467,7 @@ func (w *Work) runWorkerOkex() {
 		w.incrNotify("okex")
 		return
 	}
+	req.Header.Add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/67.0.3396.99 Safari/537.36")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -1552,6 +1569,7 @@ func (w *Work) runWorkerBinance() {
 		w.incrNotify("binance")
 		return
 	}
+	req.Header.Add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/67.0.3396.99 Safari/537.36")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -1651,6 +1669,7 @@ func (w *Work) runWorkerGate() {
 		w.incrNotify("gate")
 		return
 	}
+	req.Header.Add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/67.0.3396.99 Safari/537.36")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -1741,18 +1760,22 @@ func (w *Work) runWorkerZb() {
 	}
 
 	var req *http.Request
-	if len(w.NginxProxy) == 0 {
-		req, err = http.NewRequest("GET", "https://trans.zb.com/line/topall", nil)
-	} else {
-		req, err = http.NewRequest("GET", "http://"+w.NginxProxy+"/zb/line/topall", nil)
-	}
-	//req, err = http.NewRequest("GET", "http://119.28.65.128:30026/line/topall", nil)
+	/*
+		if len(w.NginxProxy) == 0 {
+			req, err = http.NewRequest("GET", "https://trans.zb.com/line/topall", nil)
+		} else {
+			req, err = http.NewRequest("GET", "http://"+w.NginxProxy+"/zb/line/topall", nil)
+		}
+	*/
+	ips := []string{"119.28.21.201", "119.28.44.120", "119.28.135.26", "119.28.189.170", "119.28.54.197", "119.28.188.99", "119.28.140.253", "119.28.66.42", "119.28.41.146", "119.28.73.146", "119.28.73.143", "119.28.73.252", "119.28.63.239", "119.28.76.186", "119.28.67.93", "119.28.137.161", "119.28.12.198", "119.28.140.110", "119.28.55.145", "119.28.190.36", "119.28.191.249", "119.28.83.173", "119.28.181.183", "119.28.73.138", "119.28.133.171", "119.28.19.188", "119.28.65.128", "119.28.130.226"}
+	req, err = http.NewRequest("GET", "http://"+ips[rand.Intn(len(ips)-1)]+":30026/line/topall", nil)
 
 	if err != nil {
 		log.Println("[zb] ", err.Error())
 		w.incrNotify("zb")
 		return
 	}
+	req.Header.Add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/67.0.3396.99 Safari/537.36")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -1850,6 +1873,7 @@ func (w *Work) runWorkerHuilv() {
 		w.incrNotify("huilv")
 		return
 	}
+	req.Header.Add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/67.0.3396.99 Safari/537.36")
 
 	resp, err := client.Do(req)
 	if err != nil {
