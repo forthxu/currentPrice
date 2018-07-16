@@ -1092,7 +1092,7 @@ ForEnd:
 							}
 							w.Platform["huobi"].Unlock()
 
-							if _, platformExist := w.Platform["hadax"]; platformExist && (coin+"-"+market == "eth-usdt" || coin+"-"+market == "btc-usdt") {
+							if _, platformExist := w.Platform["hadax"]; platformExist && (coin+"-"+market == "ht-usdt" || coin+"-"+market == "eth-usdt" || coin+"-"+market == "btc-usdt") {
 								w.Platform["hadax"].Lock()
 								w.Platform["hadax"].Data[coin+"-"+market] = currentPrice{
 									symbol,
