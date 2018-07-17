@@ -984,6 +984,8 @@ func (w *Work) runWorkerHuobi() {
 		w.incrNotify("huobi")
 		return
 	}
+	ws.SetReadDeadline(time.Now().Add(3 * time.Minute))
+	ws.SetWriteDeadline(time.Now().Add(1 * time.Minute))
 	defer ws.Close()
 
 	//订阅现价数据
@@ -1155,6 +1157,8 @@ func (w *Work) runWorkerHadax() {
 		w.incrNotify("hadax")
 		return
 	}
+	ws.SetReadDeadline(time.Now().Add(3 * time.Minute))
+	ws.SetWriteDeadline(time.Now().Add(1 * time.Minute))
 	defer ws.Close()
 
 	//订阅现价数据
@@ -1310,6 +1314,8 @@ func (w *Work) runWorkerFcoin() {
 		w.incrNotify("fcoin")
 		return
 	}
+	ws.SetReadDeadline(time.Now().Add(3 * time.Minute))
+	ws.SetWriteDeadline(time.Now().Add(1 * time.Minute))
 	defer ws.Close()
 
 	//订阅现价数据
