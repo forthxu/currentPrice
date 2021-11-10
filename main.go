@@ -372,6 +372,9 @@ func (w *Work) getWebsocketClient() (*websocket.Dialer, error) {
 
 //http线程返回结果结构函数
 func retrunJson(msg string, status bool, data interface{}) []byte {
+	if data == nil {
+		data = struct{}{}
+	}
 	b, err := json.Marshal(Result{status, msg, data})
 	if err != nil {
 		log.Println("[retrunJson] Marshal", err)
@@ -612,55 +615,59 @@ func (w *Work) runWorkers() {
 		w.notify("[huobi] 协程结束", "")
 	}()
 
-	// hadax websocket
-	go func() {
-		w.Lock()
-		w.Platform["hadax"] = new(currentPrices)
-		w.Unlock()
+	/*
+		// hadax websocket
+		go func() {
+			w.Lock()
+			w.Platform["hadax"] = new(currentPrices)
+			w.Unlock()
 
-		w.Platform["hadax"].Lock()
-		w.Platform["hadax"].Data = make(map[string]currentPrice)
-		w.Platform["hadax"].Unlock()
+			w.Platform["hadax"].Lock()
+			w.Platform["hadax"].Data = make(map[string]currentPrice)
+			w.Platform["hadax"].Unlock()
 
-		w.setNotify("hadax", 0)
-		for {
-			w.runWorkerHadax()
-			// 超过5次错误后休息一分钟
-			if w.getNotify("hadax") > 5 {
-				log.Println("[hadax] 读取现价接口超过五次错误休息一分钟 ")
-				w.notify("[hadax] currentPrice fail", "读取现价接口超过五次错误休息一分钟")
-				w.setNotify("hadax", 0)
-				time.Sleep(60 * time.Second)
+			w.setNotify("hadax", 0)
+			for {
+				w.runWorkerHadax()
+				// 超过5次错误后休息一分钟
+				if w.getNotify("hadax") > 5 {
+					log.Println("[hadax] 读取现价接口超过五次错误休息一分钟 ")
+					w.notify("[hadax] currentPrice fail", "读取现价接口超过五次错误休息一分钟")
+					w.setNotify("hadax", 0)
+					time.Sleep(60 * time.Second)
+				}
+				log.Println("[hadax] websocket reconnecting ", w.getNotify("hadax"))
 			}
-			log.Println("[hadax] websocket reconnecting ", w.getNotify("hadax"))
-		}
-		w.notify("[hadax] 协程结束", "")
-	}()
+			w.notify("[hadax] 协程结束", "")
+		}()
+	*/
 
-	// fcoin websocket
-	go func() {
-		w.Lock()
-		w.Platform["fcoin"] = new(currentPrices)
-		w.Unlock()
+	/*
+		// fcoin websocket
+		go func() {
+			w.Lock()
+			w.Platform["fcoin"] = new(currentPrices)
+			w.Unlock()
 
-		w.Platform["fcoin"].Lock()
-		w.Platform["fcoin"].Data = make(map[string]currentPrice)
-		w.Platform["fcoin"].Unlock()
+			w.Platform["fcoin"].Lock()
+			w.Platform["fcoin"].Data = make(map[string]currentPrice)
+			w.Platform["fcoin"].Unlock()
 
-		w.setNotify("fcoin", 0)
-		for {
-			w.runWorkerFcoin()
-			// 超过5次错误后休息一分钟
-			if w.getNotify("fcoin") > 5 {
-				log.Println("[fcoin] 读取现价接口超过五次错误休息一分钟 ")
-				w.notify("[fcoin] currentPrice fail", "读取现价接口超过五次错误休息一分钟")
-				w.setNotify("fcoin", 0)
-				time.Sleep(60 * time.Second)
+			w.setNotify("fcoin", 0)
+			for {
+				w.runWorkerFcoin()
+				// 超过5次错误后休息一分钟
+				if w.getNotify("fcoin") > 5 {
+					log.Println("[fcoin] 读取现价接口超过五次错误休息一分钟 ")
+					w.notify("[fcoin] currentPrice fail", "读取现价接口超过五次错误休息一分钟")
+					w.setNotify("fcoin", 0)
+					time.Sleep(60 * time.Second)
+				}
+				log.Println("[fcoin] websocket reconnecting ", w.getNotify("fcoin"))
 			}
-			log.Println("[fcoin] websocket reconnecting ", w.getNotify("fcoin"))
-		}
-		w.notify("[fcoin] 协程结束", "")
-	}()
+			w.notify("[fcoin] 协程结束", "")
+		}()
+	*/
 
 	// okex http
 	go func() {
@@ -741,31 +748,33 @@ func (w *Work) runWorkers() {
 	}()
 
 	// zb http
-	go func() {
-		w.Lock()
-		w.Platform["zb"] = new(currentPrices)
-		w.Unlock()
+	/*
+		go func() {
+			w.Lock()
+			w.Platform["zb"] = new(currentPrices)
+			w.Unlock()
 
-		w.Platform["zb"].Lock()
-		w.Platform["zb"].Data = make(map[string]currentPrice)
-		w.Platform["zb"].Unlock()
+			w.Platform["zb"].Lock()
+			w.Platform["zb"].Data = make(map[string]currentPrice)
+			w.Platform["zb"].Unlock()
 
-		w.setNotify("zb", 0)
-		ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond)
-		w.runWorkerZb()
-		for range ticker.C {
-			//for {
+			w.setNotify("zb", 0)
+			ticker := time.NewTicker(time.Duration(w.Gap) * time.Millisecond)
 			w.runWorkerZb()
-			// 超过10次错误后休息两分钟
-			if w.getNotify("zb") > 10 {
-				log.Println("[zb] 读取现价接口超过十次错误休息两分钟 ")
-				w.notify("[zb] currentPrice fail", "读取现价接口超过十次错误休息两分钟")
-				w.setNotify("zb", 0)
-				time.Sleep(120 * time.Second)
+			for range ticker.C {
+				//for {
+				w.runWorkerZb()
+				// 超过10次错误后休息两分钟
+				if w.getNotify("zb") > 10 {
+					log.Println("[zb] 读取现价接口超过十次错误休息两分钟 ")
+					w.notify("[zb] currentPrice fail", "读取现价接口超过十次错误休息两分钟")
+					w.setNotify("zb", 0)
+					time.Sleep(120 * time.Second)
+				}
 			}
-		}
-		w.notify("[zb] 协程结束", "")
-	}()
+			w.notify("[zb] 协程结束", "")
+		}()
+	*/
 
 	// huilv http
 	go func() {
@@ -966,9 +975,9 @@ func (w *Work) runWorkerHuobi() {
 	//连接websocket
 	var u url.URL
 	if len(w.NginxProxy) == 0 {
-		u = url.URL{Scheme: "ws", Host: "api.huobi.pro", Path: "/ws"}
+		u = url.URL{Scheme: "wss", Host: "api.huobi.br.com", Path: "/ws"}
 	} else {
-		u = url.URL{Scheme: "ws", Host: w.NginxProxy, Path: "/huobi/ws"}
+		u = url.URL{Scheme: "wss", Host: w.NginxProxy, Path: "/huobi/ws"}
 	}
 
 	DefaultDialer, err := w.getWebsocketClient()
@@ -1031,6 +1040,7 @@ ForEnd:
 			}
 
 			if strings.Contains(string(msg), "ping") { //心跳
+				//log.Println("[huobi]", string(msg), strings.Replace(string(msg), "ping", "pong", 1))
 				if err := ws.WriteMessage(websocket.TextMessage, []byte(strings.Replace(string(msg), "ping", "pong", 1))); err != nil {
 					log.Println("[huobi] ws pong err:", err)
 					w.incrNotify("huobi")
@@ -1860,7 +1870,7 @@ func (w *Work) runWorkerZb() {
 }
 
 // huilv
-func (w *Work) runWorkerHuilv() {
+func (w *Work) runWorkerHuilvX() {
 	//现价接口
 	var err error
 
@@ -1940,6 +1950,154 @@ func (w *Work) runWorkerHuilv() {
 			w.Platform["huilv"].Lock()
 			w.Platform["huilv"].Data[coin+"-"+market] = currentPrice{
 				symbol,
+				coin,
+				market,
+				price,
+				now,
+				upPrice,
+				upTime,
+				pencent,
+			}
+			w.Platform["huilv"].Unlock()
+
+			//反向汇率
+			priceX := 1 / price
+			var pencentX float64 = 0
+			var upPriceX float64 = 0
+			var upTimeX string
+			if _, platformExistX := w.Platform24["huilv"]; platformExistX {
+				w.Platform24["huilv"].Lock()
+				if prevPriceX, prevExistX := w.Platform24["huilv"].Data[market+"-"+coin]; prevExistX {
+					if prevPriceX.Price != 0 {
+						pencentX = (priceX - prevPriceX.Price) / prevPriceX.Price
+					}
+					upPriceX = prevPriceX.Price
+					upTimeX = prevPriceX.Time
+					w.Redis.Zadd("currentRank", []byte(market+"|"+coin+"|huilv"), pencentX)
+				}
+				w.Platform24["huilv"].Unlock()
+			}
+
+			w.Platform["huilv"].Lock()
+			w.Platform["huilv"].Data[market+"-"+coin] = currentPrice{
+				market + "/" + coin,
+				market,
+				coin,
+				priceX,
+				now,
+				upPriceX,
+				upTimeX,
+				pencentX,
+			}
+			w.Platform["huilv"].Unlock()
+			return true // keep iterating
+		})
+
+		//错误计数归零
+		w.setNotify("huilv", 0)
+		//保存现价数据为文件
+		if len(w.OutDir) > 0 {
+			w.save(string(body), "huilv")
+		}
+	} else {
+		log.Println("[huilv] data nil")
+		w.incrNotify("huilv")
+	}
+}
+
+func (w *Work) runWorkerHuilv() {
+	//现价接口
+	var err error
+
+	client, err := w.getHttpClient()
+	if err != nil {
+		log.Println("[huilv] ", err.Error())
+		w.incrNotify("huilv")
+		return
+	}
+
+	var req *http.Request
+	req, err = http.NewRequest("GET", "https://query1.finance.yahoo.com/v7/finance/quote?symbols=CNY=X,HKD=X,GBP=X,EUR=X,JPY=X,AUD=X,CAD=X,SGD=X,USDT-USD,", nil)
+
+	if err != nil {
+		log.Println("[huilv] ", err.Error())
+		w.incrNotify("huilv")
+		return
+	}
+	req.Header.Add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/67.0.3396.99 Safari/537.36")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Println("[huilv] ", err.Error())
+		w.incrNotify("huilv")
+		return
+	}
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+
+	//数据处理
+	if !gjson.Valid(string(body)) {
+		log.Println("[huilv] invalid json")
+		w.incrNotify("huilv")
+		return
+	}
+	result := gjson.Get(string(body), "quoteResponse.result")
+	if result.Exists() {
+		//现价数据
+		result.ForEach(func(key, value gjson.Result) bool {
+			shortName := strings.ToLower(value.Get("shortName").String())
+			symbol := strings.ToLower(value.Get("symbol").String())
+			var tmp []string
+			if strings.Contains(shortName, "/") {
+				tmp = strings.Split(shortName, "/")
+			}else if strings.Contains(symbol, "-") {
+				tmp = strings.Split(symbol, "-")
+			}else{
+				return true
+			}
+			
+			if len(tmp) != 2 {
+				log.Println("[huilv] invalid symbol", symbol)
+				w.incrNotify("huilv")
+				return true
+			}
+
+			var coin,market string
+			if strings.Contains(shortName, "/") {
+				coin = tmp[0]
+				market = tmp[1]
+			}else if strings.Contains(symbol, "-") {
+				coin = tmp[1]
+				market = tmp[0]
+			}
+			timestamp := value.Get("regularMarketTime").Int()
+			now := time.Unix(timestamp, 0).Format("20060102150405")
+			//now := time.Now().Format("20060102150405")
+			price := value.Get("regularMarketPrice").Float()
+			if price <= 0 {
+				//return true
+			}
+
+			//正向汇率
+			var pencent float64 = 0
+			var upPrice float64 = 0
+			var upTime string
+			if _, platformExist := w.Platform24["huilv"]; platformExist {
+				w.Platform24["huilv"].Lock()
+				if prevPrice, prevExist := w.Platform24["huilv"].Data[coin+"-"+market]; prevExist {
+					if prevPrice.Price != 0 {
+						pencent = (price - prevPrice.Price) / prevPrice.Price
+					}
+					upPrice = prevPrice.Price
+					upTime = prevPrice.Time
+					w.Redis.Zadd("currentRank", []byte(coin+"|"+market+"|huilv"), pencent)
+				}
+				w.Platform24["huilv"].Unlock()
+			}
+
+			w.Platform["huilv"].Lock()
+			w.Platform["huilv"].Data[coin+"-"+market] = currentPrice{
+				coin+"-"+market,
 				coin,
 				market,
 				price,
