@@ -2017,7 +2017,7 @@ func (w *Work) runWorkerHuilv() {
 	}
 
 	var req *http.Request
-	req, err = http.NewRequest("GET", "https://query1.finance.yahoo.com/v7/finance/quote?symbols=CNY=X,HKD=X,GBP=X,EUR=X,JPY=X,AUD=X,CAD=X,SGD=X,USDT-USD,", nil)
+	req, err = http.NewRequest("GET", "https://query1.finance.yahoo.com/v7/finance/quote?symbols=CNY=X,HKD=X,GBP=X,EUR=X,JPY=X,AUD=X,CAD=X,SGD=X,USDT-USD,BTC-USD,ETH-USD", nil)
 
 	if err != nil {
 		log.Println("[huilv] ", err.Error())
@@ -2067,8 +2067,8 @@ func (w *Work) runWorkerHuilv() {
 				coin = tmp[0]
 				market = tmp[1]
 			}else if strings.Contains(symbol, "-") {
-				coin = tmp[1]
-				market = tmp[0]
+				coin = tmp[0]
+				market = tmp[1]
 			}
 			timestamp := value.Get("regularMarketTime").Int()
 			now := time.Unix(timestamp, 0).Format("20060102150405")
